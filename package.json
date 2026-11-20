@@ -1,0 +1,92 @@
+{
+  "name": "vels-syndicate",
+  "productName": "VELS Syndicate",
+  "version": "1.7.0",
+  "description": "Link the computers on your network: see what each one is doing, run tasks on them, and send files. Windows and Linux.",
+  "main": "src/main.js",
+  "author": "VELS Labs",
+  "license": "SEE LICENSE IN LICENSE",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/ui-contract.js && node test/security.js && node test/parental.js && node test/plans.js && node test/sitedesc.js && node test/slowdisk.js && node test/stale-requests.js && node test/updates.js && node test/two-nodes.js",
+    "privacy-check": "node scripts/privacy-check.js",
+    "dist": "electron-builder --win --x64 --publish never",
+    "dist:linux": "electron-builder --linux --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "^45.3.3",
+    "electron-builder": "^26.15.5"
+  },
+  "overrides": {
+    "app-builder-lib": {
+      "minimatch": "^11.0.1"
+    },
+    "@electron/universal": {
+      "minimatch": "^11.0.1"
+    }
+  },
+  "build": {
+    "appId": "com.vels.syndicate",
+    "productName": "VELS Syndicate",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "build/icon.png",
+      "package.json",
+      "LICENSE",
+      "NOTICE.md"
+    ],
+    "asar": true,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableCookieEncryption": true,
+      "onlyLoadAppFromAsar": true,
+      "enableEmbeddedAsarIntegrityValidation": true
+    },
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "portable": {
+      "artifactName": "VELS-Syndicate-Portable-${version}.exe"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "VELS Syndicate",
+      "runAfterFinish": true,
+      "artifactName": "VELS-Syndicate-Setup-${version}.exe"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "build/icon.png",
+      "category": "Network",
+      "executableName": "vels-syndicate",
+      "maintainer": "VELS Labs",
+      "synopsis": "Link the computers on your network"
+    },
+    "appImage": {
+      "artifactName": "VELS-Syndicate-${version}.AppImage"
+    },
+    "deb": {
+      "artifactName": "VELS-Syndicate-${version}.deb"
+    },
+    "copyright": "Copyright (c) 2026 VELS Labs"
+  }
+}

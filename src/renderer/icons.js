@@ -1,0 +1,42 @@
+// Line icons (SF Symbols-inspired, drawn for this app).
+window.ICONS = (() => {
+  const s = (d, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
+  const icons = {
+    office: s('<rect x="3" y="4" width="18" height="12" rx="2.2"/><path d="M8 20h8M12 16v4"/>'),
+    link: s('<path d="M9.5 14.5l5-5"/><path d="M11 6.5l1.2-1.2a4 4 0 015.6 5.6L16.6 12M13 17.5l-1.2 1.2a4 4 0 01-5.6-5.6L7.4 12"/>'),
+    tasks: s('<path d="M4 6.5l1.5 1.5L8.5 5"/><path d="M11 7h9"/><path d="M4 12.5l1.5 1.5 3-3"/><path d="M11 13h9"/><path d="M11 19h9"/><circle cx="6" cy="19" r="1.3"/>'),
+    files: s('<path d="M4 7.5A2.5 2.5 0 016.5 5H10l2 2h5.5A2.5 2.5 0 0120 9.5v7a2.5 2.5 0 01-2.5 2.5h-11A2.5 2.5 0 014 16.5z"/>'),
+    settings: s('<circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M4.2 7.5l2.1 1.2M17.7 15.3l2.1 1.2M4.2 16.5l2.1-1.2M17.7 8.7l2.1-1.2"/>'),
+    desktop: s('<rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M8 20.5h8M12 16.5v4"/>'),
+    plus: s('<path d="M12 5v14M5 12h14"/>'),
+    play: s('<path d="M7 5l12 7-12 7z" fill="currentColor" stroke="none"/>'),
+    stop: s('<rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor" stroke="none"/>'),
+    x: s('<path d="M6 6l12 12M18 6L6 18"/>'),
+    check: s('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
+    shield: s('<path d="M12 3l7 3v5.5c0 4.4-3 8-7 9.5-4-1.5-7-5.1-7-9.5V6z"/><path d="M9 12l2 2 4-4"/>'),
+    upload: s('<g class="mv"><path d="M12 16V4M7 9l5-5 5 5"/></g><path d="M4 16v2.5A1.5 1.5 0 005.5 20h13a1.5 1.5 0 001.5-1.5V16"/>'),
+    folder: s('<path d="M3.5 7.5A2.5 2.5 0 016 5h3.5l2 2H18a2.5 2.5 0 012.5 2.5v7A2.5 2.5 0 0118 19H6a2.5 2.5 0 01-2.5-2.5z"/>'),
+    terminal: s('<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M7 10l3 2.5L7 15M12.5 15H17"/>'),
+    radar: s('<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12l5.5-5.5"/>'),
+    trash: s('<g class="mv"><path d="M5 7h14M10 7V5h4v2"/></g><path d="M7 7l1 12h8l1-12"/>'),
+    chevron: s('<path d="M9 6l6 6-6 6"/>'),
+    bolt: s('<path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/>'),
+    wifi: s('<path d="M3 9.5a13 13 0 0118 0M6 13a8 8 0 0112 0M9 16.4a3.5 3.5 0 016 0"/><circle cx="12" cy="19.3" r="0.9" fill="currentColor"/>'),
+    gpu: s('<rect x="3" y="7" width="18" height="10" rx="2"/><circle cx="9" cy="12" r="2.4"/><path d="M14 10h4M14 14h4M6 17v2M10 17v2"/>'),
+    lock: s('<rect x="5" y="10.5" width="14" height="10" rx="2.2"/><g class="mv"><path d="M8 10.5V8a4 4 0 018 0v2.5"/></g>'),
+    family: s('<circle cx="8.5" cy="7.5" r="3"/><circle cx="17" cy="9.5" r="2.3"/><path d="M3 19.5c.6-3.3 2.8-5 5.5-5s4.9 1.7 5.5 5"/><path d="M14.5 15.2c.8-.5 1.6-.7 2.5-.7 2.2 0 3.8 1.4 4.2 4"/>'),
+    game: s('<path d="M7.5 8.5h9a4.5 4.5 0 014.4 5.4l-.6 3a2.4 2.4 0 01-4.1 1.1L14.5 16h-5l-1.7 2a2.4 2.4 0 01-4.1-1.1l-.6-3A4.5 4.5 0 017.5 8.5z"/><path d="M8 11v3M6.5 12.5h3"/><circle cx="15.5" cy="11.6" r=".9" fill="currentColor"/><circle cx="17.3" cy="13.4" r=".9" fill="currentColor"/>'),
+    globe: s('<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.5 5.2 3.5 8.5s-1.1 6.1-3.5 8.5c-2.4-2.4-3.5-5.2-3.5-8.5S9.6 5.9 12 3.5z"/>'),
+    app: s('<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 9h17"/><circle cx="6.5" cy="6.8" r=".6" fill="currentColor"/><circle cx="8.6" cy="6.8" r=".6" fill="currentColor"/>'),
+    moon: s('<path d="M19.5 14.5A8 8 0 019.5 4.5a8 8 0 1010 10z"/>'),
+    eye: s('<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>'),
+    clock: s('<circle cx="12" cy="12" r="8.5"/><g class="mv"><path d="M12 7.5V12l3 2"/></g>'),
+    copy: s('<rect x="8.5" y="8.5" width="11" height="11" rx="2.2"/><g class="mv"><path d="M15.5 8.5V6.2A1.7 1.7 0 0013.8 4.5H6.2A1.7 1.7 0 004.5 6.2v7.6a1.7 1.7 0 001.7 1.7h2.3"/></g>'),
+    arrow: s('<path d="M5 12h13M13 7l5 5-5 5"/>'),
+    open: s('<path d="M18 14v4.5A1.5 1.5 0 0116.5 20h-11A1.5 1.5 0 014 18.5v-11A1.5 1.5 0 015.5 6H10"/><g class="mv"><path d="M14 4h6v6M20 4l-8.5 8.5"/></g>'),
+    send: s('<path d="M4 12l16-8-6 16-2.5-6.5z"/>'),
+  };
+  // class="ic ic-<name>" lets the stylesheet give each icon its own small hover animation
+  for (const k of Object.keys(icons)) icons[k] = icons[k].replace('<svg ', `<svg class="ic ic-${k}" `);
+  return icons;
+})();

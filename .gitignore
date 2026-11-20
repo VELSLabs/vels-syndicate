@@ -1,0 +1,28 @@
+# build output and installed tools
+node_modules/
+dist/
+out/
+USB-Ready/
+
+# your personal word list for the privacy check (never upload)
+.privacy-words
+
+# app data if it ever ends up in the project folder (contains pairing keys and logs)
+identity.json
+peers.json
+settings.json
+license.json
+site-info.json
+transfers.json
+security-log.jsonl*
+*.velspart
+
+# local environment / editor / OS files
+.env
+.env.*
+*.log
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

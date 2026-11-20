@@ -1,0 +1,104 @@
+VELS Syndicate - command sheet
+==============================
+
+---------------- WINDOWS ----------------
+Open a Command Prompt (Win+R, type cmd, Enter) and paste these.
+
+Go to the project folder (do this first):
+    cd /d "%USERPROFILE%\Desktop\VELS Labs\VELS Syndicate"
+
+Install Node.js (only once, only if BUILD.bat says it's missing):
+    winget install OpenJS.NodeJS.LTS
+
+Build the portable .exe + installer (runs tests + privacy check first, output in USB-Ready):
+    BUILD.bat
+
+Copy the USB-Ready folder onto a USB stick:
+    COPY-TO-USB.bat
+
+Run the app straight from the source code (for testing changes):
+    RUN-DEV.bat
+
+Run the security + network tests:
+    npm test
+
+Check that parental controls can see the front window on this PC (20 seconds, switch apps while it runs):
+    node scripts\test-activity.js
+
+Check the project for personal info before uploading to GitHub:
+    npm run privacy-check
+
+Check dependencies for known security problems:
+    npm audit
+
+Update Electron and the build tools to the newest safe versions:
+    npm update
+
+Find this PC's IP address (for "Connect by IP address"):
+    ipconfig
+
+Open the firewall ports by hand (Command Prompt as Administrator):
+    netsh advfirewall firewall add rule name="VELS Syndicate TCP" dir=in action=allow protocol=TCP localport=47821 profile=private,domain
+    netsh advfirewall firewall add rule name="VELS Syndicate UDP" dir=in action=allow protocol=UDP localport=47820 profile=private,domain
+
+Where the app keeps its pairing keys, settings and security log (delete to reset this PC):
+    explorer "%APPDATA%\VELS Syndicate\node"
+
+---------------- LINUX ----------------
+Open a terminal and paste these.
+
+Install Node.js 22 (only once, Ubuntu/Debian):
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs
+
+Go to the project folder (wherever you copied it), then build the .AppImage + .deb:
+    ./build-linux.sh
+
+Run from source:
+    npm install && npm start
+
+Install the .deb:
+    sudo apt install ./USB-Ready/VELS-Syndicate-1.6.0.deb
+
+Open the firewall ports by hand (home-network addresses only):
+    sudo ufw allow proto tcp from 192.168.0.0/16 to any port 47821 && sudo ufw allow proto udp from 192.168.0.0/16 to any port 47820
+
+Find this PC's IP address:
+    ip -brief address
+
+Where the app keeps its data (delete to reset this PC):
+    xdg-open ~/.config/"VELS Syndicate"/node
+
+---------------- LICENSE + STORE ----------------
+Download the official license text into the project (do this once, before uploading):
+    curl -L -o LICENSE https://polyformproject.org/licenses/noncommercial/1.0.0.txt
+
+Set up selling (Polar): follow SELLING.md, then edit this file with the store IDs:
+    notepad src\config\store.js
+
+Run the plan/license tests (uses a fake store, no internet needed):
+    node test\plans.js
+
+---------------- GITHUB ----------------
+IMPORTANT - keep your email private. Every commit is stamped with an email address.
+1. On github.com: Settings > Emails > tick "Keep my email addresses private"
+   and "Block command line pushes that expose my email". Copy the
+   ...@users.noreply.github.com address it shows you.
+2. In the project folder, use that address for this project:
+    git config user.name "YOUR-GITHUB-NAME"
+    git config user.email "PASTE-THE-NOREPLY-ADDRESS-HERE"
+
+Check for personal info right before every upload:
+    npm run privacy-check
+
+First upload (after creating an empty repository on github.com):
+    git init
+    git add .
+    git status
+    git commit -m "VELS Syndicate 1.6.0"
+    git branch -M main
+    git remote add origin https://github.com/YOUR-NAME/vels-syndicate.git
+    git push -u origin main
+
+Build Windows + Linux files on GitHub (download them from Actions > the run > Artifacts):
+    git tag v1.6.0
+    git push origin v1.6.0
