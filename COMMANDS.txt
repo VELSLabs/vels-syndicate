@@ -5,7 +5,7 @@ VELS Syndicate - command sheet
 Open a Command Prompt (Win+R, type cmd, Enter) and paste these.
 
 Go to the project folder (do this first):
-    cd /d "%USERPROFILE%\Desktop\VELS Labs\VELS Syndicate"
+    cd /d "%USERPROFILE%\Desktop\Projects\VELS Labs\VELS Syndicate\Code"
 
 Install Node.js (only once, only if BUILD.bat says it's missing):
     winget install OpenJS.NodeJS.LTS

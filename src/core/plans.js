@@ -3,14 +3,15 @@
 //   pcs           how many OTHER PCs this PC can link to (your own PC doesn't count)
 //   kids          how many of those can share activity with the main PC (Family page)
 //   maxFileBytes  largest single file that can be sent
+//   nas           can this PC be (or use) the home NAS
 const GB = 1024 ** 3;
 
 const PLANS = {
   free: { name: 'Free', pcs: 3, kids: 3, maxFileBytes: 1 * GB },
   family: { name: 'Family', pcs: 6, kids: 6, maxFileBytes: 5 * GB },
-  pro: { name: 'Pro', pcs: 15, kids: 15, maxFileBytes: 20 * GB },
-  team: { name: 'Team', pcs: 25, kids: 25, maxFileBytes: 100 * GB, commercial: true },
-  business: { name: 'Business', pcs: 100, kids: 100, maxFileBytes: Infinity, commercial: true },
+  pro: { name: 'Pro', pcs: 15, kids: 15, maxFileBytes: 20 * GB, nas: true },
+  team: { name: 'Team', pcs: 25, kids: 25, maxFileBytes: 100 * GB, commercial: true, nas: true },
+  business: { name: 'Business', pcs: 100, kids: 100, maxFileBytes: Infinity, commercial: true, nas: true },
 };
 const ORDER = ['free', 'family', 'pro', 'team', 'business'];
 const PAID = ORDER.slice(1);

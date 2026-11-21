@@ -2,6 +2,50 @@
 
 Every update gets a new version number. It shows in the installer's file name and in **Settings → About**.
 
+## 1.9.0
+- **New: NAS (Pro, Team and Business).** One shared folder for the whole home, kept on one PC.
+  - **NAS → Use this PC as the NAS**, then choose a folder (for example `D:\Family Files`). Switches: recycle bin (30 days), keep this PC awake, ask before new devices can use it.
+  - Every paired PC sees it in its **NAS** tab: browse folders, search, **Upload** or drag files in, **New folder**, rename, delete, and **Get** to download a copy.
+  - Access per PC: **Full**, **View only** or **No access**, asked the first time a PC opens the NAS and changeable in **NAS settings**. On family setups the main PC decides.
+  - A **Kids** folder: kids' PCs see only that folder and can use it without asking. Any other PC can also be limited to it.
+  - Deleting goes to the NAS recycle bin for 30 days (or to the NAS PC's Recycle Bin if the bin is off). Restore or empty it from **Recycle bin**.
+  - Move the NAS to another folder or another PC, with **Copy everything over** or **Start empty**. The old folder is never deleted.
+  - Phones connected to the NAS PC get a **NAS** tab: browse, **Save to NAS** and **Get**.
+  - Free and Family show a preview with an upgrade button. Files never go through the internet.
+- **New: File history.** In **Office**, open a PC and press **File history** to see everything that PC sent or received, with any PC or phone.
+  - Filters (sent/received, 7 or 30 days), search, and multi-select.
+  - **Open** or **Show** files that are also on this PC, **Get a copy** from that PC, **Send again** to another PC or phone, and **Delete on that PC** (it goes to that PC's Recycle Bin, and that PC shows a note).
+  - On normal setups anyone can open it. On family setups (with a main PC) it needs the main PC passcode.
+  - "Get a copy" follows that PC's **Send files** setting (Allow / Ask / Never). Deleting always asks that PC, only works on files it received (never its own originals), and is written in its security log.
+- **New: tab names.** **Settings → Appearance → Tab names** renames the sidebar tabs and the phone page tabs (Send, Get, NAS) on each PC, with a reset button per tab and **Reset all to default**. On family setups a kid's PC asks the main PC to approve new names.
+- New tests: file history (permissions, passcode, Recycle Bin, re-send), tab names (kid approval) and the NAS (access levels, Kids folder, recycle bin, moving, phones).
+
+## 1.8.0
+- **New: phones and tablets.** Send photos, videos, music and any file between your PCs and an iPhone, iPad or Android device, with nothing to install on the phone.
+  - **Files → Connect phone or tablet** shows a QR code. Scan it with the phone's camera, then click **Allow** on the PC and name the phone.
+  - The phone page has **Send to PC** (photo library or any file) and **Get from PC** (files you drop on the phone in the Files tab). Phone to phone works through the PC.
+  - Phones show up in **Send to** with a phone icon, and in **Connections → Phones & tablets** (rename, remove).
+  - Step-by-step help pop-ups on the phone: saving to Photos on iPhone, where downloads go, sending several files, and adding VELS to the Home Screen. Each can be hidden with "Don't show this again" and reopened with **?**.
+  - Big transfers continue where they left off if the connection drops.
+- **Security for phones:**
+  - The page only answers on your home network.
+  - Everything is encrypted (TweetNaCl).
+  - Codes work once and expire after 2 minutes. The phone gets its own key after approval, stored encrypted on the PC.
+  - Replayed or tampered requests are refused, and repeated bad requests block that address.
+  - The phone server is off unless a phone is connected or a code is on screen.
+- The firewall button now also opens the phone port (47822) to your local network.
+- Phones don't count toward the plan's PC limit. The plan's file size limit applies.
+- New test: phone pairing, upload, resume, download, phone-to-phone, restart and refusing strangers.
+- New installs start with the **Green** accent color (was Blue). If you already picked a color, it stays as you set it.
+- **Phone QR** in the sidebar (under Settings) opens the QR code in one click. A phone that's already connected can scan it just to open VELS: no new Allow, and the PC's QR window closes by itself.
+- The phone page matches the PC's accent color (it switches within a few seconds when you change it) and follows the phone's own Light/Dark Mode.
+- Phones fixes found in testing:
+  - The PC now shows "Page closed" by itself when a phone closes its VELS page.
+  - On iPhone, the Home Screen icon opens in Safari so it stays connected (Home Screen web apps get separate storage).
+  - A phone that reconnects with the same name replaces its old entry instead of being listed twice, and files waiting for it move over.
+  - If another program uses the phone port, the next free one is used and remembered.
+  - The QR code prefers the real Wi-Fi/Ethernet address over virtual adapters (WSL, Hyper-V, VPNs).
+
 ## 1.7.0
 - Purchases now use the **live** VELS Labs store: the Get buttons open real checkout pages (Family $5, Pro $15, Team $69, Business $199) and real keys unlock the plan. Keys from the old test store no longer work.
 - Updated Electron to version 45 (version 39 no longer gets security fixes). The build no longer downloads Electron in a separate step.

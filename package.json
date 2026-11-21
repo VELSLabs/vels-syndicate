@@ -1,7 +1,7 @@
 {
   "name": "vels-syndicate",
   "productName": "VELS Syndicate",
-  "version": "1.7.0",
+  "version": "1.9.0",
   "description": "Link the computers on your network: see what each one is doing, run tasks on them, and send files. Windows and Linux.",
   "main": "src/main.js",
   "author": "VELS Labs",
@@ -12,7 +12,7 @@
   },
   "scripts": {
     "start": "electron .",
-    "test": "node test/ui-contract.js && node test/security.js && node test/parental.js && node test/plans.js && node test/sitedesc.js && node test/slowdisk.js && node test/stale-requests.js && node test/updates.js && node test/two-nodes.js",
+    "test": "node test/startup.js && node test/ui-contract.js && node test/security.js && node test/parental.js && node test/plans.js && node test/sitedesc.js && node test/slowdisk.js && node test/stale-requests.js && node test/updates.js && node test/phones.js && node test/history.js && node test/nas.js && node test/two-nodes.js",
     "privacy-check": "node scripts/privacy-check.js",
     "dist": "electron-builder --win --x64 --publish never",
     "dist:linux": "electron-builder --linux --x64 --publish never"

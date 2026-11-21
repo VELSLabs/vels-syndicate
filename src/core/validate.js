@@ -74,6 +74,15 @@ function cleanPerms(p) {
   return out;
 }
 
+// tabs that can be renamed (Settings → Appearance → Tab names). Empty = the default name.
+const TAB_KEYS = ['office', 'connections', 'tasks', 'files', 'nas', 'family', 'security', 'settings', 'phoneqr', 'phoneSend', 'phoneGet', 'phoneNas'];
+function cleanTabNames(t) {
+  const out = {};
+  if (!t || typeof t !== 'object') return out;
+  for (const k of TAB_KEYS) { const v = cleanText(t[k], 16, ''); if (v) out[k] = v; }
+  return out;
+}
+
 const ACCENTS = ['blue', 'purple', 'hotpink', 'pink', 'crimson', 'orange', 'green', 'teal', 'graphite'];
 // Settings coming from the window: whitelist keys, check types, clamp values.
 function cleanSettingsPatch(patch) {
@@ -88,6 +97,7 @@ function cleanSettingsPatch(patch) {
   if (typeof patch.receiveDir === 'string' && path.isAbsolute(patch.receiveDir) && patch.receiveDir.length < 1024) out.receiveDir = patch.receiveDir;
   if (Number.isInteger(patch.maxParallel)) out.maxParallel = Math.min(8, Math.max(1, patch.maxParallel));
   ['keepInTray', 'startWithWindows', 'allowPairing', 'lanOnly', 'describeSites'].forEach(bool);
+  if ('tabNames' in patch) out.tabNames = cleanTabNames(patch.tabNames);
   if (Array.isArray(patch.presets)) {
     out.presets = patch.presets.slice(0, 50).filter(p => p && typeof p === 'object' && isStr(p.cmd, 8000) && p.cmd.trim())
       .map(p => ({ name: cleanText(p.name, 40, 'Preset'), cmd: p.cmd, shell: ['powershell', 'cmd', 'bash', 'sh'].includes(p.shell) ? p.shell : 'powershell' }));
@@ -95,4 +105,4 @@ function cleanSettingsPatch(patch) {
   return out;
 }
 
-module.exports = { isId, isStr, num, cleanText, isB64, cleanStats, safeRel, isLocalAddress, shellsFor, STATUSES, cleanPerms, cleanSettingsPatch };
+module.exports = { TAB_KEYS, cleanTabNames, isId, isStr, num, cleanText, isB64, cleanStats, safeRel, isLocalAddress, shellsFor, STATUSES, cleanPerms, cleanSettingsPatch };

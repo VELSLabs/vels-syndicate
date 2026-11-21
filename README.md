@@ -7,7 +7,10 @@ Link the computers on your home network. See what each one is doing, run tasks o
 - **Office board.** Every computer gets a desk showing its status (Idle, Waiting, Working, Busy, Offline), its role, live CPU/RAM/GPU use, and what it is working on.
 - **Tasks.** Run PowerShell, Command Prompt or Bash commands on any paired computer and watch the output live. You can save presets, stop tasks, and queue them.
 - **Files.** Drag files or folders onto a computer to send them. Every file is checked when it arrives.
-- **Main PC and parental controls (Windows).** One PC is the main (parent) PC with a 4- or 6-digit passcode. A kid's PC can share its activity with it. The parent sees a Discord-style live status (what's being played, including the game mode where the game shows it, or which website is open) and a daily history with screen time, top games, apps and sites, and a timeline. The kid's PC always shows that it is being shared. Turning it off, removing the main PC or quitting the app needs the main PC's passcode.
+- **NAS (Pro and up).** Turn one PC into home storage: a shared folder every PC and phone can browse, save to and download from, with per-device access, a Kids folder and a 30-day recycle bin.
+- **File history.** See everything a PC sent or received and open, re-send, copy back or delete those files.
+- **Your own tab names.** Rename the sidebar and phone-page tabs on each PC.
+- **Main PC and parental controls (Windows). One PC is the main (parent) PC with a 4- or 6-digit passcode. A kid's PC can share its activity with it. The parent sees a Discord-style live status (what's being played, including the game mode where the game shows it, or which website is open) and a daily history with screen time, top games, apps and sites, and a timeline. The kid's PC always shows that it is being shared. Turning it off, removing the main PC or quitting the app needs the main PC's passcode.
 - **Secure by default.** You connect a computer by typing a PIN shown on the other screen. Each computer gets its own permissions, all traffic is encrypted, and a security log records activity (see below).
 - **Glass interface.** On Windows 11 your desktop shows through the window, blurred. Windows 10 and Linux get a frosted look painted by the app.
 
@@ -18,6 +21,7 @@ Link the computers on your home network. See what each one is doing, run tasks o
 | Connect PCs, run tasks, share files | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Other PCs you can link (incl. kids' PCs) | 3 | 6 | 15 | 25 | 100 |
 | File size per transfer | 1 GB | 5 GB | 20 GB | 100 GB | any size |
+| Home NAS | — | — | ✓ | ✓ | ✓ |
 | Use in a business | — | — | — | ✓ | ✓ |
 
 Paid plans are one-time purchases. The license key is entered once on the main PC and covers every PC connected to it. Activating needs the internet once, and then everything works offline. See [SELLING.md](SELLING.md) for how the store is set up.
@@ -40,6 +44,46 @@ The app is not code-signed, so Windows will show "Windows protected your PC". Cl
 3. The other computer shows a 6-digit PIN. Type it on the requesting computer. That's it: from now on they reconnect by themselves.
 
 If a computer doesn't show up, type its IP address under **Connect by IP address**.
+
+## Phones and tablets
+
+Send photos, videos, music and any other file between your computers and your **iPhone, iPad or Android** phone or tablet. There's no app to install: the phone uses its web browser.
+
+1. On the PC, click **Phone QR** in the sidebar (or **Files → Connect phone or tablet**). A QR code appears.
+2. Scan it with the phone's camera and tap the link. The phone must be on the same Wi-Fi.
+3. Click **Allow** on the PC and give the phone a name. With **Remember this phone** on, it stays connected: next time open the bookmark or Home Screen icon, or just scan **Phone QR** again (a connected phone opens straight away, no new Allow).
+
+The phone page uses the PC's accent color and follows the phone's own Light/Dark Mode.
+
+On the phone page, **Send to PC** picks photos, videos or files; they arrive in the PC's received files folder. **Get from PC** shows files you sent to the phone from the Files tab, ready to download. Files can also go from one phone to another through the PC.
+
+- **Private:** the page is served by your PC on your home network only. Nothing goes through the internet.
+- **Encrypted:** the QR code holds a one-time code that never travels over the network. The phone and PC turn it into an encryption key, and the phone then gets its own key. Copied or replayed requests are refused.
+- **One-time codes:** a code works once and expires after 2 minutes. You can remove a phone any time in **Connections → Phones & tablets**.
+- Phones don't count toward your plan's PC limit. The plan's file size limit still applies, and phone downloads are limited to 2 GB per file.
+- **iPhone:** downloads go to the **Files** app. To put a photo or video in **Photos**, open it in Files, tap **Share**, then **Save Image** or **Save Video**. The page shows these steps the first time.
+- Keep the phone's screen on during big transfers. Phones pause web pages in the background; if a transfer stops, it continues where it left off.
+- If the phone can't open the page, click **Allow VELS through the Windows firewall** in the connect window.
+- Tip: in your router, give the PC a fixed (reserved) IP address. The phone page's address includes the PC's IP; if it changes, phones need to scan the code once more.
+
+## NAS (home storage)
+
+Available on **Pro, Team and Business**. One PC holds a folder that every paired PC and phone can use.
+
+1. On the PC that's usually on (a big or external drive is best), open **NAS** → **Use this PC as the NAS** and choose a folder.
+2. Other PCs open their **NAS** tab. The first time, the NAS PC asks what each one may do: **Full** (open, save, rename, delete), **View only** or **No access**. On family setups the main PC decides. Change it later in **NAS settings**.
+3. Drag files onto the NAS tab or press **Upload**. Double-click a folder to open it; press **Get** to download a copy.
+
+- **Kids folder:** kids' PCs (sharing activity with the main PC) see only the Kids folder and can save there without asking.
+- **Recycle bin:** deleted files stay 30 days in the NAS recycle bin. With the bin off, they go to the NAS PC's Recycle Bin.
+- **Keep awake:** while the NAS is on, the NAS PC doesn't go to sleep (the screen can still turn off).
+- **Moving it:** **NAS settings → Move the NAS** picks a new folder on the same PC. On another PC, open **NAS → ⚙ → Move the NAS to this PC**. Choose **Copy everything over** or **Start empty**. Old files are never deleted.
+- **Phones:** a phone connected to the NAS PC gets a **NAS** tab with **Save to NAS** and **Get**.
+- A NAS on one drive isn't a backup. Keep a copy of important files somewhere else too.
+
+## File history
+
+In **Office**, click a PC and press **File history**. It lists everything that PC sent or received. You can open files that are also on this PC, **Get a copy**, **Send again** to another PC or phone, or **Delete on that PC** (to its Recycle Bin, with a note on that PC). On family setups this needs the main PC passcode.
 
 ## Main PC and parental controls
 

@@ -17,6 +17,8 @@ const { ActivityMonitor, pageUrl, siteFromUrl } = require('./activity');
 const { SiteInfo } = require('./sitedesc');
 const Plans = require('./plans');
 const { License } = require('./license');
+const { PhoneHub } = require('./phones');
+const { Nas } = require('./nas');
 
 const PROTO = 2;
 const MAX_LINE = 1536 * 1024;      // encrypted frames (file chunks are ~350 KB)
@@ -192,12 +194,12 @@ class VelsNode extends EventEmitter {
     const stored = sr.data || {};
     this.settings = Object.assign({
       name: V.cleanText(os.hostname(), 40, 'This PC'),
-      theme: 'system', accent: 'blue',
+      theme: 'system', accent: 'green',
       taskPolicy: 'ask',          // 'ask' | 'deny'
       filePolicy: 'ask',          // 'ask' | 'auto'
       receiveDir: path.join(os.homedir(), 'Downloads', 'VELS Syndicate'),
       maxParallel: 2, keepInTray: true, startWithWindows: false,
-      allowPairing: true, lanOnly: true, describeSites: true,
+      allowPairing: true, lanOnly: true, describeSites: true, tabNames: {},
       presets: DEFAULT_PRESETS,
     }, V.cleanSettingsPatch(stored));
     this.manualStatus = 'Idle';
@@ -247,6 +249,42 @@ class VelsNode extends EventEmitter {
     this.pendingBatches = new Map();
     this.transfersFile = path.join(this.dataDir, 'transfers.json');
     this._loadTransfers();
+    this.pendingRpc = new Map();   // requests this PC sent, waiting for an answer
+    this.pendingAsks = new Map();  // requests from other PCs, waiting for the user here
+    this._expect = new Map();      // peerId -> until: files this PC asked that PC for
+    this.trash = opts.trash || null; // moves a file to the Recycle Bin (Electron); tests use a folder
+    this._rpcHandlers = {
+      // file history: this PC's list, for a paired PC (family setups: main PC or passcode)
+      'fh.list': async (peerId, a) => {
+        if (this.mainId && !(await this._familyOk(peerId, a.pin))) throw new Error('Enter the main PC passcode to see this PC\'s file history');
+        return this._historyList();
+      },
+      // file history: get a copy / send again / delete, on this PC
+      'fh.act': (peerId, a) => this._historyActIn(peerId, a),
+      // the NAS (when this PC is the NAS)
+      'nas.open': (peerId, a) => this.nas.open(peerId, a.kid === true),
+      'nas.list': (peerId, a) => this.nas.list(this.nas.accessFor(peerId, a.kid === true), a.dir),
+      'nas.search': (peerId, a) => this.nas.search(this.nas.accessFor(peerId, a.kid === true), a.q),
+      'nas.mkdir': (peerId, a) => this.nas.mkdir(this.nas.accessFor(peerId, a.kid === true), a.dir, a.name),
+      'nas.rename': (peerId, a) => this.nas.rename(this.nas.accessFor(peerId, a.kid === true), a.path, a.name, this.peers[peerId].name),
+      'nas.delete': (peerId, a) => this.nas.remove(this.nas.accessFor(peerId, a.kid === true), a.paths, this.peers[peerId].name),
+      'nas.bin': (peerId, a) => this.nas.bin(this.nas.accessFor(peerId, a.kid === true)),
+      'nas.restore': (peerId, a) => this.nas.restore(this.nas.accessFor(peerId, a.kid === true), Array.isArray(a.ids) ? a.ids.filter(x => typeof x === 'string').slice(0, 500) : []),
+      'nas.purge': (peerId, a) => this.nas.purge(this.nas.accessFor(peerId, a.kid === true), a.ids === 'all' ? 'all' : Array.isArray(a.ids) ? a.ids.filter(x => typeof x === 'string').slice(0, 500) : []),
+      'nas.get': (peerId, a) => this.nas.get(this.nas.accessFor(peerId, a.kid === true), peerId, a.paths),
+      'nas.handover': (peerId, a) => this.nas.handoverIn(peerId, a),
+      'nas.sendall': peerId => this.nas.sendAllIn(peerId),
+      // a kid PC asks the main PC to approve new tab names
+      'tabs.ask': (peerId, a) => {
+        if (!this.isMain) throw new Error('This PC is not the main PC');
+        const names = V.cleanTabNames(a.names);
+        return this._askUser('tabs', peerId, { names }, 5 * 60000);
+      },
+    };
+    // phones and tablets (file sharing through a web page on the home network)
+    this.phones = new PhoneHub(this, { readKeep, writeKeep }, { port: opts.phonePort === 0 ? 0 : (opts.phonePort || (this.tcpPort ? this.tcpPort + 1 : 0)) });
+    this.phones.restoreOutbox();
+    this.nas = new Nas(this, { readKeep, writeKeep }); // the home NAS (Pro and up)
     this.blocks = new Map();       // 'ip:x' | 'id:x' -> {until, reason, label}
     this.authFails = new Map();    // ip -> {count, first}
     this.pairRecent = [];
@@ -364,6 +402,7 @@ class VelsNode extends EventEmitter {
   // ---------- lifecycle ----------
   async start() {
     this.stopped = false;
+    this.timers = []; // ready before anything below can add to it (discovery can start listening first)
     await new Promise((res, rej) => {
       this.server = net.createServer(s => this._incoming(s));
       this.server.maxConnections = 64;
@@ -371,12 +410,15 @@ class VelsNode extends EventEmitter {
       this.server.listen(this.tcpPort, '0.0.0.0', () => { this.server.off('error', rej); this.tcpPort = this.server.address().port; res(); });
     });
     if (this.discovery) this._startDiscovery();
-    this.timers = [
+    try { await this.phones.ensureRunning(); } catch (e) { this.audit('warn', 'phone', `Phones can't connect right now: ${e.message}`); }
+    this.timers.push(
       setInterval(() => this._tickStats(), 2000),
       setInterval(() => this._tickConnect(), 3000),
       setInterval(() => this._tickPing(), 5000),
       setInterval(() => this._flushState(), 400),
-    ];
+      setInterval(() => this.nas.cleanBin().catch(() => {}), 6 * 3600000),
+    );
+    setImmediate(() => { this.nas.cleanBin().catch(() => {}); this.emit('nas-awake', this.nas.active() && this.nas.cfg.awake); });
     this._tickStats();
     setTimeout(() => this._tickConnect(), 500);
     if (this.monitor.enabled) this.activity.start();
@@ -394,6 +436,7 @@ class VelsNode extends EventEmitter {
   stop() {
     this.stopped = true; // a connection still being set up must not finish after this
     clearTimeout(this._retryTimer);
+    if (this.phones) this.phones.stop();
     (this.timers || []).forEach(clearInterval);
     try { this.udp && this.udp.close(); } catch {}
     try { this.server && this.server.close(); } catch {}
@@ -891,7 +934,7 @@ class VelsNode extends EventEmitter {
     return '';
   }
   _statusMsg() {
-    return { t: 'stats', stats: this.stats, status: this.effectiveStatus(), role: this.role, name: this.settings.name, activeTask: this._activeTaskTitle(), queued: this.queue.length, plan: this.tier() };
+    return { t: 'stats', stats: this.stats, status: this.effectiveStatus(), role: this.role, name: this.settings.name, activeTask: this._activeTaskTitle(), queued: this.queue.length, plan: this.tier(), nas: this.nas ? this.nas.advert() : null };
   }
   _sendStatsTo(conn) { conn.send(this._statusMsg()); }
   _tickStats() {
@@ -929,6 +972,7 @@ class VelsNode extends EventEmitter {
         r.activeTask = V.cleanText(m.activeTask, 80);
         r.queued = V.num(m.queued, 0, 1e6);
         r.plan = Plans.norm(m.plan);
+        r.nas = m.nas && typeof m.nas === 'object' ? { label: V.cleanText(m.nas.label, 40, 'NAS') } : null;
         if (peerId === this.main.mainId && !this.isMain && r.plan !== this.mainPlan) { this.mainPlan = r.plan; this._saveSettings(); setImmediate(() => this._tickStats()); }
         { const nm = V.cleanText(m.name, 64, peer.name); if (nm !== peer.name) { peer.name = nm; this._savePeers(); } }
         this._changed(); break;
@@ -1064,6 +1108,15 @@ class VelsNode extends EventEmitter {
         const entries = Array.isArray(m.entries) ? m.entries.slice(0, 5000).map(e => this._cleanEntry(e)).filter(Boolean) : [];
         const st = m.storage && typeof m.storage === 'object' ? m.storage : {};
         pend.resolve({ day: V.cleanText(m.day, 12), entries, storage: { bytes: V.num(st.bytes, 0, 1e13), days: V.num(st.days, 0, 1e5), oldest: /^\d{4}-\d{2}-\d{2}$/.test(st.oldest) ? st.oldest : '', keepDays: V.num(st.keepDays, 0, 400) } });
+        break;
+      }
+      // ----- general requests between PCs (file history, NAS, tab names) -----
+      case 'rpc': this._rpcIn(peerId, conn, m); break;
+      case 'rpc-res': {
+        const pend = typeof m.reqId === 'string' && this.pendingRpc.get(m.reqId);
+        if (!pend || pend.peerId !== peerId) break;
+        this.pendingRpc.delete(m.reqId); clearTimeout(pend.timer);
+        if (m.error) pend.reject(new Error(V.cleanText(m.error, 300, 'Something went wrong on the other PC'))); else pend.resolve(m.value === undefined ? null : m.value);
         break;
       }
       case 'task-run': this._incomingTask(peerId, m); break;
@@ -1287,11 +1340,12 @@ class VelsNode extends EventEmitter {
   }
 
   // ---------- files ----------
-  async sendFiles(target, paths) {
+  async sendFiles(target, paths, opts = {}) {
     if (!V.isId(target)) throw new Error('Unknown computer');
     if (!Array.isArray(paths) || !paths.length || paths.some(p => typeof p !== 'string' || !path.isAbsolute(p))) throw new Error('Nothing to send');
+    const toPhone = this.phones.has(target);
     const c = this.conns[target];
-    if (!c) throw new Error('That PC is offline');
+    if (!c && !toPhone) throw new Error('That PC is offline');
     const files = [];
     const walk = async (abs, rel, depth) => {
       if (depth > 32 || files.length > 5000) return;
@@ -1300,9 +1354,10 @@ class VelsNode extends EventEmitter {
       if (st.isDirectory()) { for (const e of await fsp.readdir(abs)) await walk(path.join(abs, e), path.join(rel, e), depth + 1); }
       else if (st.isFile()) files.push({ abs, rel, size: st.size });
     };
-    for (const p of paths) await walk(p, path.basename(p), 0);
+    for (const p of paths) await walk(p, opts.relFrom ? path.relative(opts.relFrom, p) : path.basename(p), 0);
     if (!files.length) throw new Error('Nothing to send');
     if (files.length > 5000) throw new Error('Too many files in one go (max 5000)');
+    if (toPhone) return this.phones.offer(target, files);
     const lim = this._fileLimitWith(target);
     const big = files.find(f => f.size > lim.bytes);
     if (big) throw new Error(`"${path.basename(big.abs)}" is ${(big.size / 1024 ** 3).toFixed(1)} GB. The ${lim.name} plan sends files up to ${(lim.bytes / 1024 ** 3).toFixed(0)} GB each${this._upsell(lim.tier, 'maxFileBytes')}.`);
@@ -1314,7 +1369,7 @@ class VelsNode extends EventEmitter {
       return { fileId, name, size: f.size };
     });
     this.pendingBatches.set(batchId, { direction: 'out', peerId: target, fileIds: list.map(f => f.fileId) });
-    c.send({ t: 'file-offer', batchId, files: list });
+    c.send(Object.assign({ t: 'file-offer', batchId, files: list }, opts.pull ? { pull: true } : {}, typeof opts.nasDir === 'string' ? { nasDir: opts.nasDir, kid: this.isKidPC() } : {}));
     this._changed();
     return batchId;
   }
@@ -1338,6 +1393,11 @@ class VelsNode extends EventEmitter {
       const up = Plans.next(lim.tier);
       return this.answerFiles(m.batchId, false, `Files over ${(lim.bytes / 1024 ** 3).toFixed(0)} GB need ${up ? Plans.plan(up).name : 'a bigger plan'}`);
     }
+    if (typeof m.nasDir === 'string') return this.nas.incomingOffer(peerId, m, ids);
+    if (m.pull === true && (this._expect.get(peerId) || 0) > Date.now()) {
+      this.audit('info', 'file', `Receiving ${ids.length} file(s) you asked ${peer.name} for`);
+      return this.answerFiles(m.batchId, true);
+    }
     if (peer.perms.files === 'never') {
       this.audit('warn', 'file', `Blocked ${ids.length} file(s) from ${peer.name}`);
       return this.answerFiles(m.batchId, false, 'This PC does not accept files from you');
@@ -1353,15 +1413,15 @@ class VelsNode extends EventEmitter {
     try { const s = fs.statfsSync(dir); return s.bavail * s.bsize; } catch { return Infinity; }
   }
 
-  answerFiles(batchId, accept, reason) {
+  answerFiles(batchId, accept, reason, intoDir) {
     const b = this.pendingBatches.get(batchId);
     if (!b || b.direction !== 'in') return;
     const c = this.conns[b.peerId];
     if (accept && (!c || !this.peers[b.peerId])) { this.pendingBatches.delete(batchId); this._toast('warn', 'Those files can\'t be received: the other PC is no longer connected.'); return; }
     if (accept) {
-      try { fs.mkdirSync(this.settings.receiveDir, { recursive: true }); } catch {}
+      try { fs.mkdirSync(intoDir || this.settings.receiveDir, { recursive: true }); } catch {}
       const total = b.fileIds.reduce((a, id) => a + (this.transfers.get(id) || { size: 0 }).size, 0);
-      if (total + 200 * 1024 * 1024 > this._freeSpace(this.settings.receiveDir)) {
+      if (total + 200 * 1024 * 1024 > this._freeSpace(intoDir || this.settings.receiveDir)) {
         accept = false; reason = 'Not enough free disk space on the other PC';
         this._toast('warn', 'Declined incoming files: not enough free disk space');
       }
@@ -1371,7 +1431,7 @@ class VelsNode extends EventEmitter {
       const tr = this.transfers.get(id);
       if (!tr || tr.state !== 'offered') continue;
       tr.state = accept ? 'queued' : 'declined';
-      if (accept) tr.root = this.settings.receiveDir; else if (reason) tr.error = reason;
+      if (accept) { tr.root = intoDir || this.settings.receiveDir; if (intoDir) tr.nas = true; } else if (reason) tr.error = reason;
     }
     c && c.send({ t: 'file-answer', batchId, accept: !!accept, reason: reason || '' });
     this._changed();
@@ -1514,6 +1574,7 @@ class VelsNode extends EventEmitter {
   cancelTransfer(fileId) {
     const tr = this.transfers.get(fileId);
     if (!tr || ['done', 'failed', 'declined', 'cancelled'].includes(tr.state)) return;
+    if (tr.phone) return this.phones.cancel(tr);
     tr.state = 'cancelled';
     const c = this.conns[tr.peerId];
     c && c.send({ t: 'file-cancel', fileId });
@@ -1537,6 +1598,225 @@ class VelsNode extends EventEmitter {
     for (const tr of this.transfers.values()) if (tr.direction === 'in' && tr.state === 'done' && tr.finalPath === p) return true;
     return false;
   }
+
+  // ---------- general requests between PCs ----------
+  // ask a paired PC something; its handler answers (or refuses) on its side
+  _rpc(peerId, method, args, timeoutMs = 20000) {
+    if (!V.isId(peerId)) return Promise.reject(new Error('Unknown computer'));
+    const c = this.conns[peerId];
+    if (!c) return Promise.reject(new Error(`${this.peers[peerId] ? this.peers[peerId].name : 'That PC'} is offline`));
+    const reqId = C.randomId();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.pendingRpc.delete(reqId); reject(new Error('No answer from that PC')); }, timeoutMs);
+      this.pendingRpc.set(reqId, { peerId, resolve, reject, timer });
+      c.send({ t: 'rpc', reqId, method, args: args || {} });
+    });
+  }
+  async _rpcIn(peerId, conn, m) {
+    if (typeof m.reqId !== 'string' || !V.isId(m.reqId) || typeof m.method !== 'string') return;
+    const fn = this._rpcHandlers && this._rpcHandlers[m.method];
+    let value, error = '';
+    try {
+      if (!fn) throw new Error('This PC needs a newer VELS Syndicate for that');
+      value = await fn(peerId, m.args && typeof m.args === 'object' ? m.args : {});
+    } catch (e) { error = String(e && e.message || e).slice(0, 300) || 'Refused'; }
+    if (!conn.closed) conn.send({ t: 'rpc-res', reqId: m.reqId, value, error });
+  }
+  // family setups: is this request allowed without asking? (it comes from the main PC, or carries the right passcode)
+  async _familyOk(peerId, pin) {
+    if (!this.mainId) return false;
+    if (peerId === this.mainId) return true;
+    if (typeof pin !== 'string' || !pin) return false;
+    try { await this.verifyMainPasscode(pin); return true; } catch { return false; }
+  }
+
+  // show a question to the user on this PC ("Allow / Deny"); resolves with the answer
+  _askUser(kind, peerId, data, timeoutMs) {
+    const reqId = C.randomId();
+    const peer = this.peers[peerId];
+    return new Promise(resolve => {
+      const timer = setTimeout(() => { this.pendingAsks.delete(reqId); this.emit('request-gone', { key: 'ask:' + reqId }); resolve({ ok: false, timeout: true }); }, timeoutMs);
+      this.pendingAsks.set(reqId, Object.assign({ kind, peerId, timer, resolve }, data));
+      this.emit('ask', Object.assign({ reqId, kind, peerId, peerName: peer ? peer.name : 'A PC' }, data));
+    });
+  }
+
+  // ---------- file history (Office → a PC → File history) ----------
+  // everything this PC sent or received (kept between restarts), and where each file is now
+  _historyList() {
+    const out = [];
+    const exists = p => { try { return typeof p === 'string' && fs.statSync(p).isFile(); } catch { return false; } };
+    for (const t of this.transfers.values()) {
+      const otherName = t.peerName || (this.peers[t.peerId] ? this.peers[t.peerId].name : (this.phones && this.phones.phones[t.peerId] ? this.phones.phones[t.peerId].name : ''));
+      let where = 'gone';
+      if (t.deletedAt) where = 'deleted';
+      else if (t.direction === 'in' && t.state === 'done' && exists(t.finalPath)) where = 'here';
+      else if (t.direction === 'out' && exists(t.abs)) where = 'original';
+      out.push({ id: t.id, name: t.name, dir: t.direction, otherId: t.peerId || '', other: otherName || 'a removed device', phone: !!t.phone, size: t.size, state: t.state, at: t.endedAt || t.createdAt || 0, where });
+    }
+    return out.sort((a, b) => b.at - a.at).slice(0, 500);
+  }
+  // asked from the window: the other PC's list, plus which of those files are also on this PC
+  async fileHistory(peerId, pin) {
+    if (!this.peers[peerId]) throw new Error('Unknown computer');
+    await this._familyGate(pin);
+    const list = await this._rpc(peerId, 'fh.list', { pin: this.isMain ? undefined : pin });
+    if (!Array.isArray(list)) throw new Error('No answer from that PC');
+    const local = id => { const t = this.transfers.get(id); return t && t.state === 'done' ? this.transferPath(id) : null; };
+    return list.slice(0, 500).filter(x => x && V.isId(x.id)).map(x => ({
+      id: x.id, name: V.cleanText(x.name, 1024, 'file'), dir: x.dir === 'out' ? 'out' : 'in', other: V.cleanText(x.other, 64, 'a device'), otherIsMe: x.otherId === this.id, phone: !!x.phone,
+      size: V.num(x.size, 0, 2 ** 53), state: V.cleanText(x.state, 20), at: V.num(x.at, 0, 1e15), where: ['here', 'original', 'gone', 'deleted'].includes(x.where) ? x.where : 'gone', hereToo: !!local(x.id),
+    }));
+  }
+  // family setups: the main PC must be unlocked, other PCs give the passcode (checked by the main PC)
+  async _familyGate(pin) {
+    if (!this.mainId) return;
+    if (this.isMain) return this._requireAdmin();
+    await this.verifyMainPasscode(pin);
+  }
+  // copy = send them here, send = to another PC, delete = to the Recycle Bin on that PC
+  async fileHistoryAct(peerId, action, ids, target, pin) {
+    if (!['copy', 'send', 'delete'].includes(action) || !Array.isArray(ids) || !ids.length || ids.length > 500 || !ids.every(V.isId)) throw new Error('Nothing selected');
+    await this._familyGate(pin);
+    if (action === 'copy') this._expect.set(peerId, Date.now() + 10 * 60000);
+    return this._rpc(peerId, 'fh.act', { action, ids, target: action === 'send' ? target : undefined, pin: this.isMain ? undefined : pin }, 3 * 60000);
+  }
+  // re-send files that are on this PC (from the history window)
+  async resendLocal(ids, target) {
+    const paths = ids.filter(V.isId).map(id => this.transferPath(id)).filter(Boolean);
+    if (!paths.length) throw new Error('Those files aren\'t on this PC anymore');
+    return this.sendFiles(target, paths);
+  }
+  async _historyActIn(peerId, a) {
+    const peer = this.peers[peerId];
+    const action = a.action;
+    if (!['copy', 'send', 'delete'].includes(action) || !Array.isArray(a.ids)) throw new Error('Bad request');
+    const items = a.ids.filter(V.isId).slice(0, 500).map(id => this.transfers.get(id)).filter(Boolean);
+    let files;
+    if (action === 'delete') files = items.filter(t => t.direction === 'in' && t.state === 'done' && !t.deletedAt && t.finalPath && fs.existsSync(t.finalPath)); // only files this PC RECEIVED, never its own originals
+    else files = items.map(t => ({ t, p: this.transferPath(t.id) })).filter(x => x.p);
+    if (!files.length) throw new Error(action === 'delete' ? 'Only files this PC received can be deleted from here' : 'Those files aren\'t on this PC anymore');
+    const names = files.map(f => (f.t || f).name);
+    let target = null;
+    if (action === 'send') {
+      if (!V.isId(a.target) || !this.peers[a.target]) throw new Error('This PC isn\'t paired with that PC');
+      if (!this.conns[a.target]) throw new Error(`${this.peers[a.target].name} is offline`);
+      target = a.target;
+    }
+    // permission: family setups → main PC or passcode; otherwise this PC's "Send files" setting for that PC
+    let ok = this.mainId ? await this._familyOk(peerId, a.pin) : false;
+    if (!ok) {
+      if (this.mainId) throw new Error('Enter the main PC passcode first');
+      if (peer.perms.files === 'never') throw new Error(`${this.settings.name} doesn't allow file requests from you`);
+      if (peer.perms.files === 'allow' && action !== 'delete') ok = true;
+      else {
+        const r = await this._askUser('files', peerId, { action, names: names.slice(0, 20), count: names.length, targetName: target ? this.peers[target].name : '' }, 2 * 60000);
+        if (!r.ok) throw new Error(r.timeout ? 'Nobody answered on that PC' : `${this.settings.name} said no`);
+      }
+    }
+    if (action === 'copy') { await this.sendFiles(peerId, files.map(f => f.p), { pull: true }); this.audit('info', 'file', `Sent ${files.length} file(s) to ${peer.name} (it asked for a copy)`); return { ok: true, count: files.length }; }
+    if (action === 'send') { await this.sendFiles(target, files.map(f => f.p)); this.audit('info', 'file', `Sent ${files.length} file(s) to ${this.peers[target].name}, asked by ${peer.name}`); return { ok: true, count: files.length }; }
+    let done = 0;
+    for (const t of files) {
+      try { await this._toTrash(t.finalPath); t.deletedAt = Date.now(); done++; } catch (e) { this.audit('warn', 'file', `Couldn't delete "${t.name}": ${e.message}`); }
+    }
+    this._saveTransfers(); this._changed();
+    this.audit('warn', 'file', `${peer.name} deleted ${done} received file(s) on this PC (moved to the Recycle Bin)`);
+    this._toast('warn', `${peer.name} deleted ${done === 1 ? `"${names[0]}"` : done + ' files'} on this PC. ${done === 1 ? 'It is' : 'They are'} in the Recycle Bin.`);
+    return { ok: true, count: done };
+  }
+  async _toTrash(p) {
+    if (this.trash) return this.trash(p);
+    const dir = path.join(this.dataDir, 'deleted-files'); // tests and systems without a Recycle Bin
+    fs.mkdirSync(dir, { recursive: true });
+    fs.renameSync(p, uniquePath(path.join(dir, path.basename(p))));
+  }
+
+  // ---------- the NAS, from this PC's window ----------
+  // the same requests work whether the NAS is this PC or another one
+  async nasOp(op, args = {}) {
+    const ops = ['open', 'list', 'search', 'mkdir', 'rename', 'delete', 'bin', 'restore', 'purge', 'get'];
+    if (!ops.includes(op)) throw new Error('Unknown NAS request');
+    const N = this.nas;
+    if (N.cfg.root) {
+      const acc = N.accessFor('self'), me = this.settings.name;
+      switch (op) {
+        case 'open': if (!N.active()) throw new Error(N.planOk() ? 'The NAS folder is missing. Plug the drive back in or choose a new folder.' : 'The NAS needs the Pro plan'); return Object.assign({ label: N.label(), host: me, here: true, root: N.cfg.root, recycle: N.cfg.recycle }, acc, N.space());
+        case 'list': return N.list(acc, args.dir);
+        case 'search': return N.search(acc, args.q);
+        case 'mkdir': return N.mkdir(acc, args.dir, args.name);
+        case 'rename': return N.rename(acc, args.path, args.name, me);
+        case 'delete': return N.remove(acc, args.paths, me);
+        case 'bin': return N.bin(acc);
+        case 'restore': return N.restore(acc, args.ids || []);
+        case 'purge': return N.purge(acc, args.ids === 'all' ? 'all' : args.ids || []);
+        case 'get': throw new Error('The files are already on this PC');
+      }
+    }
+    const h = N.hostElsewhere();
+    if (!h) throw new Error('There is no NAS yet');
+    if (!h.online) throw new Error(`${h.name} (the NAS) is offline`);
+    if (op === 'get') this._expect.set(h.id, Date.now() + 10 * 60000);
+    const r = await this._rpc(h.id, 'nas.' + op, Object.assign({}, args, { kid: this.isKidPC() }), op === 'open' ? 6 * 60000 : 60000);
+    if (op === 'open' && r) { N.client = { level: r.level, kids: !!r.kids, hostId: h.id }; }
+    return r;
+  }
+  // save files to the NAS (from this PC)
+  async nasUpload(paths, dir) {
+    const N = this.nas;
+    dir = require('./nas').cleanRel(dir);
+    if (N.cfg.root) {
+      if (!N.active()) throw new Error('The NAS folder is missing');
+      const into = N._abs(N.accessFor('self'), dir);
+      let n = 0;
+      for (const p of paths) {
+        if (typeof p !== 'string' || !path.isAbsolute(p)) continue;
+        const dest = uniquePath(path.join(into, path.basename(p)));
+        await fsp.cp(p, dest, { recursive: true, errorOnExist: true, force: false }); n++;
+      }
+      this._changed();
+      return { ok: true, count: n, local: true };
+    }
+    const h = N.hostElsewhere();
+    if (!h || !h.online) throw new Error(h ? `${h.name} (the NAS) is offline` : 'There is no NAS yet');
+    await this.sendFiles(h.id, paths, { nasDir: dir });
+    return { ok: true };
+  }
+  nasLocalPath(rel) {
+    if (!this.nas.cfg.root) throw new Error('The NAS is on another PC');
+    return this.nas._abs(this.nas.accessFor('self'), rel);
+  }
+  _upsellNas() { return ' (upgrade in Settings → Plan)'; }
+
+  // ---------- custom tab names ----------
+  // kid PCs ask the main PC; everyone else changes their own names right away
+  isKidPC() { return !!(this.monitor.enabled && !this.isMain); }
+  async setTabNames(names) {
+    const clean = V.cleanTabNames(names);
+    if (!this.isKidPC()) { this.settings.tabNames = clean; this._saveSettings(); this._changed(); return { applied: true }; }
+    const mainId = this.main.mainId;
+    if (!mainId || !this.conns[mainId]) throw new Error('The main PC needs to be on to approve new tab names');
+    this._rpc(mainId, 'tabs.ask', { names: clean }, 5 * 60000).then(r => {
+      if (r && r.ok) { this.settings.tabNames = V.cleanTabNames(r.names); this._saveSettings(); this._toast('info', 'The main PC allowed the new tab names.'); this._changed(); }
+      else this._toast('warn', 'The main PC didn\'t allow the new tab names.');
+    }, e => this._toast('warn', `Tab names: ${e.message}`));
+    return { applied: false, asked: true };
+  }
+  // the user here answered a request from another PC (tab names, file history actions, NAS access)
+  answerAsk(reqId, kind, allow, extra) {
+    const p = this.pendingAsks.get(reqId);
+    if (!p || p.kind !== kind) throw new Error('That request is gone');
+    if (kind === 'nas') this._requireAdmin(); // choosing NAS access on a family setup needs the main PC unlocked
+    this.pendingAsks.delete(reqId); clearTimeout(p.timer);
+    p.resolve(Object.assign({ ok: !!allow }, p.names ? { names: p.names } : {}, extra && typeof extra === 'object' ? { extra } : {}));
+  }
+
+  // ---------- phones and tablets ----------
+  async phoneConnect() { this._requireAdmin(); return this.phones.newPairing(); }
+  phoneAnswer(sid, allow, name, remember) { this._requireAdmin(); return this.phones.answer(sid, allow, name, remember); }
+  phoneCancel(sid) { this.phones.cancelPairing(sid); }
+  phoneRename(id, name) { this._requireAdmin(); this.phones.rename(id, name); }
+  phoneForget(id) { this._requireAdmin(); this.phones.forget(id); }
 
   // ---------- main (parent) PC + passcode ----------
   // One PC in the home is the "main" PC. Its 4- or 6-digit passcode protects: the main PC's
@@ -1738,11 +2018,11 @@ class VelsNode extends EventEmitter {
   planInfo() {
     const t = this.tier(), own = this.license.tier(), l = this.limits(t);
     return {
-      tier: t, name: l.name, pcs: l.pcs, kids: l.kids, maxFileBytes: Number.isFinite(l.maxFileBytes) ? l.maxFileBytes : null,
+      tier: t, name: l.name, pcs: l.pcs, kids: l.kids, nas: !!l.nas, maxFileBytes: Number.isFinite(l.maxFileBytes) ? l.maxFileBytes : null,
       pcCount: this.pcCount(), commercial: !!l.commercial,
       own, inherited: t !== own, fromName: t !== own && this.peers[this.main.mainId] ? this.peers[this.main.mainId].name : '',
       kidCount: this.isMain ? this.kidCount() : null, license: this.license.info(),
-      tiers: Plans.ORDER.map(x => { const p = this.limits(x); return { tier: x, name: p.name, pcs: p.pcs, kids: p.kids, commercial: !!p.commercial, maxFileBytes: Number.isFinite(p.maxFileBytes) ? p.maxFileBytes : null }; }),
+      tiers: Plans.ORDER.map(x => { const p = this.limits(x); return { tier: x, name: p.name, pcs: p.pcs, kids: p.kids, commercial: !!p.commercial, maxFileBytes: Number.isFinite(p.maxFileBytes) ? p.maxFileBytes : null, nas: !!p.nas }; }),
     };
   }
 
@@ -1868,7 +2148,7 @@ class VelsNode extends EventEmitter {
       this.transfers.set(t.id, {
         id: t.id, direction: t.direction, peerId: V.isId(t.peerId) ? t.peerId : '', peerName: V.cleanText(t.peerName, 64), name: V.cleanText(t.name, 1024, 'file'),
         size: V.num(t.size, 0, 2 ** 53), bytes: V.num(t.bytes, 0, 2 ** 53), state: ['done', 'failed', 'declined', 'cancelled'].includes(t.state) ? t.state : 'failed',
-        error: V.cleanText(t.error, 200), finalPath: typeof t.finalPath === 'string' ? t.finalPath : undefined, abs: typeof t.abs === 'string' ? t.abs : undefined, createdAt: V.num(t.createdAt, 0, 1e15), endedAt: V.num(t.endedAt, 0, 1e15), history: true,
+        error: V.cleanText(t.error, 200), finalPath: typeof t.finalPath === 'string' ? t.finalPath : undefined, abs: typeof t.abs === 'string' ? t.abs : undefined, createdAt: V.num(t.createdAt, 0, 1e15), endedAt: V.num(t.endedAt, 0, 1e15), history: true, deletedAt: V.num(t.deletedAt, 0, 1e15) || undefined, phone: t.phone === true || undefined,
       });
     }
   }
@@ -1877,7 +2157,7 @@ class VelsNode extends EventEmitter {
     this._saveTrTimer = setTimeout(() => {
       const done = [...this.transfers.values()].filter(t => ['done', 'failed', 'declined', 'cancelled'].includes(t.state))
         .sort((a, b) => a.createdAt - b.createdAt).slice(-300)
-        .map(t => ({ id: t.id, direction: t.direction, peerId: t.peerId, peerName: t.peerName || (this.peers[t.peerId] ? this.peers[t.peerId].name : ''), name: t.name, size: t.size, bytes: t.bytes, state: t.state, error: t.error || '', finalPath: t.direction === 'in' ? t.finalPath : undefined, abs: t.direction === 'out' ? t.abs : undefined, createdAt: t.createdAt, endedAt: t.endedAt || Date.now() }));
+        .map(t => ({ id: t.id, direction: t.direction, peerId: t.peerId, peerName: t.peerName || (this.peers[t.peerId] ? this.peers[t.peerId].name : ''), name: t.name, size: t.size, bytes: t.bytes, state: t.state, error: t.error || '', finalPath: t.direction === 'in' ? t.finalPath : undefined, abs: t.direction === 'out' ? t.abs : undefined, createdAt: t.createdAt, endedAt: t.endedAt || Date.now(), deletedAt: t.deletedAt || undefined, phone: t.phone || undefined }));
       try { writeJSON(this.transfersFile, done); } catch {}
     }, 500);
   }
@@ -1888,6 +2168,7 @@ class VelsNode extends EventEmitter {
     if ('name' in clean && !clean.name) delete clean.name;
     const before = { allowPairing: this.settings.allowPairing, lanOnly: this.settings.lanOnly, taskPolicy: this.settings.taskPolicy, filePolicy: this.settings.filePolicy };
     if (this.monitor.enabled) { delete clean.keepInTray; delete clean.startWithWindows; }
+    delete clean.tabNames; // tab names go through setTabNames (kid PCs need the main PC's OK)
     if (['allowPairing', 'lanOnly', 'taskPolicy', 'filePolicy'].some(k => k in clean && clean[k] !== this.settings[k])) this._requireAdmin();
     Object.assign(this.settings, clean);
     for (const k of Object.keys(before)) if (k in clean && clean[k] !== before[k]) this.audit('info', 'setting', `Setting changed: ${k} = ${clean[k]}`);
@@ -1917,7 +2198,7 @@ class VelsNode extends EventEmitter {
       });
     }
     devices.sort((a, b) => (b.paired - a.paired) || (b.connected - a.connected) || a.name.localeCompare(b.name));
-    const strip = o => { const { output, abs, ws, hash, partPath, root, ...rest } = o; return rest; };
+    const strip = o => { const { output, abs, ws, hash, partPath, root, fh, busy, ...rest } = o; return rest; };
     const trView = t => Object.assign(strip(t), { canOpen: t.state === 'done' && !!(t.direction === 'out' ? t.abs : t.finalPath) });
     const blocked = [];
     for (const [key, b] of this.blocks) if (b.until > now) blocked.push({ key, label: b.label || key.replace(/^(ip|id):/, ''), reason: b.reason, until: b.until });
@@ -1929,6 +2210,8 @@ class VelsNode extends EventEmitter {
         stats: this.stats, platform: process.platform, port: this.tcpPort, udpPort: this.udpPort, activeTask: this._activeTaskTitle(), queued: this.queue.length,
       },
       devices,
+      phones: this.phones.view(),
+      nas: this.nas.view(),
       tasks: [...this.tasks.values()].map(t => Object.assign(strip(t), { outLen: t.output.length })).sort((a, b) => b.createdAt - a.createdAt).slice(0, 200),
       transfers: [...this.transfers.values()].map(trView).sort((a, b) => b.createdAt - a.createdAt).slice(0, 400),
       settings: this.settings,

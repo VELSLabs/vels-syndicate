@@ -35,6 +35,15 @@ window.ICONS = (() => {
     arrow: s('<path d="M5 12h13M13 7l5 5-5 5"/>'),
     open: s('<path d="M18 14v4.5A1.5 1.5 0 0116.5 20h-11A1.5 1.5 0 014 18.5v-11A1.5 1.5 0 015.5 6H10"/><g class="mv"><path d="M14 4h6v6M20 4l-8.5 8.5"/></g>'),
     send: s('<path d="M4 12l16-8-6 16-2.5-6.5z"/>'),
+    phone: s('<rect x="7" y="2.5" width="10" height="19" rx="2.6"/><g class="mv"><path d="M10.5 18.5h3"/></g>'),
+    qr: s('<rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><g class="mv"><path d="M14.5 14.5h2.5v2.5M20.5 14.5v6h-3M14.5 20.5v-2"/></g>'),
+    image: s('<rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-8 8"/>'),
+    video: s('<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/>'),
+    music: s('<path d="M9 18V6l10-2v12"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="16" r="2"/>'),
+    doc: s('<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 12h6M9 16h6"/>'),
+    nas: s('<rect x="3.5" y="4" width="17" height="7" rx="2"/><rect x="3.5" y="13" width="17" height="7" rx="2"/><circle cx="7.5" cy="7.5" r=".9" fill="currentColor"/><circle cx="7.5" cy="16.5" r=".9" fill="currentColor"/><g class="mv"><path d="M12 7.5h5M12 16.5h5"/></g>'),
+    reset: s('<g class="mv"><path d="M4 12a8 8 0 108-8 8 8 0 00-5.7 2.3L4 8.5"/><path d="M4 4v4.5h4.5"/></g>'),
+    edit: s('<path d="M4 20h4L19 9l-4-4L4 16z"/><g class="mv"><path d="M13.5 6.5l4 4"/></g>'),
   };
   // class="ic ic-<name>" lets the stylesheet give each icon its own small hover animation
   for (const k of Object.keys(icons)) icons[k] = icons[k].replace('<svg ', `<svg class="ic ic-${k}" `);

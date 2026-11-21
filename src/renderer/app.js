@@ -59,8 +59,11 @@ function nameOf(id) {
   if (!S) return '';
   if (id === S.self.id) return S.self.name + ' (this PC)';
   const d = S.devices.find(x => x.id === id);
-  return d ? d.name : 'Unknown PC';
+  if (d) return d.name;
+  const ph = (S.phones || []).find(x => x.id === id);
+  return ph ? ph.name : 'Unknown PC';
 }
+const phoneOf = id => (S && S.phones || []).find(x => x.id === id);
 function onlineTargets() { return allDesks().filter(d => d.isSelf || d.connected); }
 
 // ---------- smooth updates ----------
@@ -114,7 +117,7 @@ function applyTheme(dark) {
   document.documentElement.classList.toggle('light', !dark);
 }
 function applyAccent() {
-  const a = ACCENTS[(S && S.settings.accent) || 'blue'] || ACCENTS.blue;
+  const a = ACCENTS[(S && S.settings.accent) || 'green'] || ACCENTS.green;
   document.documentElement.style.setProperty('--accent', a);
 }
 
@@ -124,10 +127,14 @@ const NAV = [
   { id: 'connections', label: 'Connections', icon: 'link' },
   { id: 'tasks', label: 'Tasks', icon: 'tasks' },
   { id: 'files', label: 'Files', icon: 'files' },
+  { id: 'nas', label: 'NAS', icon: 'nas' },
   { id: 'family', label: 'Family', icon: 'family' },
   { id: 'security', label: 'Security', icon: 'shield' },
   { id: 'settings', label: 'Settings', icon: 'settings' },
 ];
+// custom tab names (Settings → Appearance → Tab names); empty = the default
+const TAB_DEFAULTS = { office: 'Office', connections: 'Connections', tasks: 'Tasks', files: 'Files', nas: 'NAS', family: 'Family', security: 'Security', settings: 'Settings', phoneqr: 'Phone QR', phoneSend: 'Send', phoneGet: 'Get', phoneNas: 'NAS' };
+const tabName = k => (S && S.settings && S.settings.tabNames && S.settings.tabNames[k]) || TAB_DEFAULTS[k] || k;
 function renderNav() {
   const nearbyNew = S ? S.devices.filter(d => !d.paired && d.nearby).length : 0;
   const running = S ? S.tasks.filter(t => ['running', 'pending', 'queued', 'sent'].includes(t.state)).length : 0;
@@ -136,7 +143,10 @@ function renderNav() {
   const alerts = S ? S.security.log.filter(e => e.level === 'alert' && Date.now() - e.ts < 86400000).length : 0;
   const kidsOnline = S ? S.devices.filter(d => d.monitored && d.connected).length : 0;
   const extra = { family: kidsOnline ? `<span class="count">${kidsOnline}</span>` : '', security: alerts ? `<span class="badge" style="background:#ff453a">${alerts}</span>` : '', office: `<span class="count">${online}</span>`, connections: nearbyNew ? `<span class="badge">${nearbyNew}</span>` : '', tasks: running ? `<span class="badge">${running}</span>` : '', files: moving ? `<span class="badge">${moving}</span>` : '' };
-  $('#nav').innerHTML = NAV.map(n => `<button class="nav-item ${view === n.id ? 'active' : ''}" data-act="nav" data-view="${n.id}">${I[n.icon]}<span>${n.label}</span>${extra[n.id] || ''}</button>`).join('');
+  const phonesOn = S && S.phones ? S.phones.filter(p => p.online).length : 0;
+  const renamed = k => tabName(k) !== TAB_DEFAULTS[k];
+  $('#nav').innerHTML = NAV.map(n => `<button class="nav-item ${view === n.id ? 'active' : ''}" data-act="nav" data-view="${n.id}" ${renamed(n.id) ? `title="${esc(n.label)}"` : ''}>${I[n.icon]}<span>${esc(tabName(n.id))}</span>${extra[n.id] || ''}</button>`).join('')
+    + `<div class="nav-sep"></div><button class="nav-item" data-act="phone-connect" title="${renamed('phoneqr') ? 'Phone QR · ' : ''}Show the QR code: connect a phone or tablet, or open VELS on one that's already connected">${I.qr}<span>${esc(tabName('phoneqr'))}</span>${phonesOn ? `<span class="count">${phonesOn}</span>` : ''}</button>`;
   if (S) {
     $('.brand-sub').textContent = S.plan && S.plan.tier !== 'free' ? `Syndicate · ${S.plan.name}` : 'Syndicate';
     const me = S.self;
@@ -200,6 +210,7 @@ Views.connections = {
       <div class="head"><div><h1>Connections</h1><div class="sub">Request access to computers on your network. The other PC shows a 6-digit PIN that you type here.</div></div></div>
       <h2 class="sec" id="cNearbyH">Nearby</h2><div class="group" id="cNearby"></div>
       <h2 class="sec" id="cPairedH">Paired</h2><div class="group" id="cPaired"></div>
+      <h2 class="sec">Phones &amp; tablets <span class="sec-note">send and get files · don't count toward your plan</span></h2><div class="group" id="cPhones"></div>
       <h2 class="sec">Connect by IP address</h2>
       <div class="card"><div class="line"><input class="field grow" id="ipHost" placeholder="192.168.1.25" spellcheck="false">
         <input class="field" id="ipPort" style="width:100px" placeholder="47821">
@@ -226,6 +237,13 @@ Views.connections = {
           <label>Send files ${pseg(d, 'files', [['ask', 'Ask'], ['allow', 'Allow'], ['never', 'Never']])}</label>
           <label>Change my status ${pseg(d, 'status', [['allow', 'Allow'], ['never', 'Never']])}</label></div></div>`).join('')
       : `<div class="empty"><h3>No paired computers yet</h3><div class="small">Pair one from the Nearby list above.</div></div>`;
+    const phones = S.phones || [];
+    $('#cPhones').innerHTML = phones.map(p => `<div class="row"><div class="ico">${I.phone}</div>
+        <div class="main"><div class="t">${esc(p.name)} <span class="pill ${p.online ? 'Idle' : 'Offline'}"><span class="dot ${p.online ? 'Idle' : ''}"></span>${p.online ? 'Page open' : 'Page closed'}</span><span class="tag gray">${esc(p.kind)}</span></div>
+          <div class="d">${p.remember ? 'Remembered' : 'Until it closes VELS for 12 hours'}${p.lastSeen ? ' · last seen ' + ago(p.lastSeen) : ''}</div></div>
+        <div class="end"><button class="btn sm" data-act="phone-rename" data-id="${esc(p.id)}">${I.edit}Rename</button><button class="btn sm danger" data-act="phone-forget" data-id="${esc(p.id)}">${I.trash}Remove</button></div></div>`).join('')
+      + `<div class="row"><div class="ico">${I.qr}</div><div class="main"><div class="t">Add a phone or tablet</div><div class="d">iPhone, iPad and Android · nothing to install, works on your home Wi-Fi</div></div>
+        <div class="end"><button class="btn primary sm" data-act="phone-connect">${I.qr}Connect</button></div></div>`;
   },
 };
 
@@ -310,7 +328,7 @@ Views.files = {
   mount(el) {
     el.innerHTML = `<div class="view">
       <div class="head"><div><h1>Files</h1><div class="sub">Send files and folders straight to another computer. Everything is encrypted on the way.</div></div>
-        <div class="actions"><button class="btn" data-act="open-received">${I.folder}Received files</button><button class="btn" data-act="clear-transfers">${I.trash}Clear finished</button></div></div>
+        <div class="actions"><button class="btn primary" data-act="phone-connect">${I.qr}Connect phone or tablet</button><button class="btn" data-act="open-received">${I.folder}Received files</button><button class="btn" data-act="clear-transfers">${I.trash}Clear finished</button></div></div>
       <div class="card stack" style="margin-bottom:16px"><div class="label">Send to</div><div class="targets" id="fTargets"></div>
         <div class="dropzone" id="fDrop"><div class="big">${I.upload}</div><h3>Drop files or folders here</h3>
           <div class="muted small" style="margin-bottom:14px" id="fDropSub"></div>
@@ -322,12 +340,16 @@ Views.files = {
     dz.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); dz.classList.remove('over'); endDrag(); if (!fTarget) return toast('Pick a computer to send to first', 'warn'); sendDropped(fTarget, e.dataTransfer.files); });
   },
   update() {
-    const remote = S.devices.filter(d => d.paired);
-    if (fTarget && !remote.some(d => d.id === fTarget && d.connected)) fTarget = null;
-    if (!fTarget) { const first = remote.find(d => d.connected); fTarget = first ? first.id : null; }
-    $('#fTargets').innerHTML = remote.length ? remote.map(d => `<button class="target ${fTarget === d.id ? 'on' : ''}" data-act="f-target" data-id="${esc(d.id)}" ${d.connected ? '' : 'disabled'}><span class="dot ${d.status}"></span>${esc(d.name)}</button>`).join('')
-      : `<span class="muted small">Pair a computer first in Connections.</span>`;
-    $('#fDropSub').textContent = (fTarget ? `They'll arrive on ${nameOf(fTarget)}` : 'No computer online to send to') + ` · ${S.plan.name}: files ${fmtLimit(S.plan.maxFileBytes)} each`;
+    const remote = S.devices.filter(d => d.paired), phones = S.phones || [];
+    // phones can be picked even when their page is closed: files wait until the phone downloads them
+    if (fTarget && !remote.some(d => d.id === fTarget && d.connected) && !phoneOf(fTarget)) fTarget = null;
+    if (!fTarget) { const first = remote.find(d => d.connected) || phones.find(p => p.online); fTarget = first ? first.id : null; }
+    const phoneChips = phones.map(p => `<button class="target ${fTarget === p.id ? 'on' : ''}" data-act="f-target" data-id="${esc(p.id)}" title="${p.online ? 'VELS page open on the phone' : 'Files wait until the phone opens its VELS page'}"><span class="dot ${p.online ? 'Idle' : 'Offline'}"></span><span class="tic">${I.phone}</span>${esc(p.name)}</button>`).join('');
+    const pcChips = remote.map(d => `<button class="target ${fTarget === d.id ? 'on' : ''}" data-act="f-target" data-id="${esc(d.id)}" ${d.connected ? '' : 'disabled'}><span class="dot ${d.status}"></span>${esc(d.name)}</button>`).join('');
+    $('#fTargets').innerHTML = phoneChips + pcChips + `<button class="target add" data-act="phone-connect"><span class="tic">${I.phone}</span>Add phone</button>`
+      + (remote.length ? '' : `<span class="muted small" style="align-self:center;margin-left:4px">Pair computers in Connections.</span>`);
+    const ph = phoneOf(fTarget);
+    $('#fDropSub').textContent = (ph ? `They'll be ready on ${ph.name} · the phone downloads them from its VELS page` : fTarget ? `They'll arrive on ${nameOf(fTarget)}` : 'No computer or phone to send to') + ` · ${S.plan.name}: files ${fmtLimit(S.plan.maxFileBytes)} each`;
     $('#fList').innerHTML = S.transfers.length ? S.transfers.map(transferRow).join('') : `<div class="empty small">Nothing sent or received yet.</div>`;
   },
 };
@@ -341,17 +363,464 @@ function transferRow(t) {
     else if (!prev) speeds[t.id] = { at: now, bytes: t.bytes, rate: 0 };
     rate = speeds[t.id].rate ? ' · ' + fmtBytes(speeds[t.id].rate) + '/s' : '';
   }
-  const who = S.devices.some(d => d.id === t.peerId) ? nameOf(t.peerId) : (t.peerName || 'a removed PC');
+  const who = S.devices.some(d => d.id === t.peerId) || phoneOf(t.peerId) ? nameOf(t.peerId) : (t.peerName || (t.phone ? 'a removed phone' : 'a removed PC'));
   const dir = t.direction === 'out' ? `To ${esc(who)}` : `From ${esc(who)}`;
   const when = t.endedAt || t.createdAt ? ` · ${ago(t.endedAt || t.createdAt)}` : '';
-  const live = ['offered', 'queued', 'sending', 'receiving', 'verifying'].includes(t.state);
-  const stateText = { offered: 'Waiting for approval', queued: 'Queued', sending: 'Sending', receiving: 'Receiving', verifying: 'Verifying', done: 'Done', failed: 'Failed', declined: 'Declined', cancelled: 'Cancelled' }[t.state] || t.state;
+  const live = ['offered', 'queued', 'sending', 'receiving', 'verifying', 'waiting'].includes(t.state);
+  const stateText = { waiting: 'Ready on the phone — waiting for it to download', offered: 'Waiting for approval', queued: 'Queued', sending: 'Sending', receiving: 'Receiving', verifying: 'Verifying', done: 'Done', failed: 'Failed', declined: 'Declined', cancelled: 'Cancelled' }[t.state] || t.state;
   return `<div class="row"><div class="ico">${t.direction === 'out' ? I.upload : I.folder}</div>
     <div class="main"><div class="t" style="font-weight:550">${esc(t.name)}</div>
-      <div class="d">${dir} · ${t.state === 'done' ? fmtBytes(t.size) : `${fmtBytes(t.bytes)} of ${fmtBytes(t.size)}`} · ${stateText}${t.error ? ' — ' + esc(t.error) : ''}${rate}${when}</div>
+      <div class="d">${dir} · ${t.state === 'done' || t.state === 'waiting' ? fmtBytes(t.size) : `${fmtBytes(t.bytes)} of ${fmtBytes(t.size)}`} · ${stateText}${t.error ? ' — ' + esc(t.error) : ''}${rate}${when}</div>
       <div class="prog"><i class="${t.state === 'done' ? 'done' : ['failed', 'declined', 'cancelled'].includes(t.state) ? 'fail' : ''}" style="width:${p}%"></i></div></div>
     <div class="end">${live ? `<button class="btn sm icon" title="Cancel" data-act="cancel-transfer" data-id="${esc(t.id)}">${I.x}</button>` : ''}
       ${t.canOpen ? `<button class="btn sm" data-act="open-transfer" data-id="${esc(t.id)}" data-dir="${t.direction}" data-name="${esc(t.name)}">${I.open}Open</button><button class="btn sm ghost" data-act="show-transfer" data-id="${esc(t.id)}" title="Show in folder">${I.folder}</button>` : ''}</div></div>`;
+}
+
+function tabNameRows() {
+  const t = (S.settings && S.settings.tabNames) || {};
+  const ic = { office: 'office', connections: 'link', tasks: 'tasks', files: 'files', nas: 'nas', family: 'family', security: 'shield', settings: 'settings', phoneqr: 'qr', phoneSend: 'upload', phoneGet: 'open', phoneNas: 'nas' };
+  const row = k => `<div class="tn-row">${I[ic[k]] || ''}<div><b>${esc(t[k] || TAB_DEFAULTS[k])}</b>${t[k] ? '<span class="tn-changed">renamed</span>' : ''}<div class="tn-def">Default: ${esc(TAB_DEFAULTS[k])}</div></div>
+    <input class="field" id="tn-${k}" data-tab-key="${k}" maxlength="16" value="${esc(t[k] || '')}" placeholder="${esc(TAB_DEFAULTS[k])}" spellcheck="false">
+    <button class="btn sm icon ghost" data-act="tab-reset" data-k="${k}" title="Back to ${esc(TAB_DEFAULTS[k])}" ${t[k] ? '' : 'disabled'}>${I.reset}</button></div>`;
+  return `<div class="tn-sub">Sidebar on this PC</div>${['office', 'connections', 'tasks', 'files', 'nas', 'family', 'security', 'settings', 'phoneqr'].map(row).join('')}
+    <div class="tn-sub">Phone page (phones connected to this PC see these)</div>${['phoneSend', 'phoneGet', 'phoneNas'].map(row).join('')}`;
+}
+function saveTabNames(override) {
+  const names = {};
+  document.querySelectorAll('[data-tab-key]').forEach(i => { const v = i.value.trim(); if (v) names[i.dataset.tabKey] = v; });
+  Object.assign(names, override || {});
+  for (const k of Object.keys(names)) if (!names[k]) delete names[k];
+  return act(api.setTabNames(names).then(r => { if (r && r.asked) toast('Sent to the main PC for approval', 'info'); return r; }));
+}
+// ---------- NAS (Pro and up) ----------
+const nasUI = { key: '', info: null, dir: '', entries: [], q: '', results: null, sel: new Set(), err: '', loading: false, doneSig: -1 };
+const nasHere = () => !!(S.nas.host && S.nas.host.here);
+const nasKind = n => { const e = (String(n).split('.').pop() || '').toLowerCase(); return /^(jpe?g|png|gif|heic|webp|bmp|tiff?)$/.test(e) ? 'img' : /^(mp4|mov|mkv|avi|webm|m4v)$/.test(e) ? 'vid' : /^(mp3|m4a|wav|flac|aac|ogg)$/.test(e) ? 'aud' : 'doc'; };
+const nasIc = e => e.dir ? `<div class="nas-ic k-dir">${I.folder}</div>` : `<div class="nas-ic k-${nasKind(e.name)}">${({ img: I.image, vid: I.video, aud: I.music, doc: I.doc })[nasKind(e.name)]}</div>`;
+const nasDate = ts => { const d = new Date(ts), now = new Date(); if (d.toDateString() === now.toDateString()) return 'Today'; const y = new Date(now - 86400000); if (d.toDateString() === y.toDateString()) return 'Yesterday'; return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' }); };
+const nasJoin = (dir, name) => dir ? dir + '/' + name : name;
+const nasCanWrite = () => nasUI.info && nasUI.info.level === 'full';
+const tryApi = async p => { try { return { ok: true, value: await p }; } catch (e) { return { ok: false, error: e.message || String(e) }; } };
+
+function nasMode() {
+  const n = S.nas;
+  if (n.host) return n.host.active ? 'browse' : 'missing';
+  if (n.elsewhere) return n.elsewhere.online ? 'browse' : 'offline';
+  return n.feature ? 'setup' : 'preview';
+}
+Views.nas = {
+  mount(el) {
+    el.innerHTML = `<div class="view" id="nasView"><div class="head"><div><h1>${esc(tabName('nas'))}</h1><div class="sub" id="nasSub">One folder for the whole home. Every connected PC and phone can open, save and share files there.</div></div><div class="actions" id="nasActs"></div></div><div id="nasBody"></div></div>`;
+    nasUI.mode = ''; nasUI.sig = '';
+    const v = $('#nasView');
+    v.addEventListener('dragover', e => { if (nasUI.mode !== 'browse' || !nasCanWrite()) return; e.preventDefault(); e.stopPropagation(); v.classList.add('nas-over'); });
+    v.addEventListener('dragleave', e => { if (!v.contains(e.relatedTarget)) v.classList.remove('nas-over'); });
+    v.addEventListener('drop', e => {
+      if (nasUI.mode !== 'browse') return;
+      e.preventDefault(); e.stopPropagation(); v.classList.remove('nas-over'); endDrag();
+      if (!nasCanWrite()) return toast('You can only view the NAS', 'warn');
+      const paths = [...e.dataTransfer.files].map(f => api.pathForFile(f)).filter(Boolean);
+      if (paths.length) nasUploadPaths(paths);
+    });
+  },
+  update() {
+    const mode = nasMode();
+    const hostKey = S.nas.host ? 'self' : S.nas.elsewhere ? S.nas.elsewhere.id : '';
+    const sig = [mode, hostKey, JSON.stringify(S.nas.host && { ...S.nas.host, space: null }), S.nas.elsewhere && S.nas.elsewhere.label].join('|');
+    if (sig !== nasUI.sig) { nasUI.sig = sig; nasUI.mode = mode; nasRenderShell(mode, hostKey); }
+    // a finished upload or download: show the new files
+    const done = S.transfers.filter(t => t.state === 'done').length;
+    if (mode === 'browse' && nasUI.info && done !== nasUI.doneSig) { if (nasUI.doneSig >= 0) nasLoad(); nasUI.doneSig = done; }
+    if (mode === 'browse' && S.nas.host && S.nas.host.space) nasSpace(S.nas.host.space);
+  },
+};
+function nasRenderShell(mode, hostKey) {
+  const body = $('#nasBody'), acts = $('#nasActs'), sub = $('#nasSub');
+  if (!body) return;
+  acts.innerHTML = '';
+  sub.textContent = 'One folder for the whole home. Every connected PC and phone can open, save and share files there.';
+  if (mode === 'preview') {
+    const fake = ['2026 Summer trip', 'Birthdays', 'Family photo.jpg', 'Beach day.mp4', 'Road trip mix.mp3', 'School forms.pdf', 'Taxes 2026', 'Recipes'];
+    body.innerHTML = `<div class="nas-preview card"><div class="nas-fake">${fake.map(n => `<div class="nas-row"><div class="nas-ic"></div><div class="nm">${n}</div></div>`).join('')}</div>
+      <div class="nas-up"><div class="nas-big" style="margin:0 auto">${I.nas}</div><h2>Home storage is a Pro feature</h2>
+        <p>Turn any PC into a NAS: one shared folder for photos, videos and documents that every PC and phone can use. Recycle bin, per-device access and a Kids folder included.</p>
+        <div class="line" style="justify-content:center"><button class="btn primary" data-act="buy" data-tier="pro">Upgrade to Pro${planPrice(S.plan.license, 'pro') ? ' · ' + esc(planPrice(S.plan.license, 'pro')) : ''}</button><button class="btn" data-act="plan-info" data-tier="pro">Compare plans</button></div>
+        <div class="small muted" style="margin-top:10px">You're on ${esc(S.plan.name)}. Pro covers every PC connected to your main PC.</div></div></div>`;
+    return;
+  }
+  if (mode === 'setup') {
+    const others = S.devices.filter(d => d.paired);
+    body.innerHTML = `<div class="card nas-setup"><div class="nas-hd"><div class="nas-big">${I.nas}</div><div><b>No NAS yet</b><div class="small muted">Pick the PC that will hold the files. It needs to be on (and awake) for others to reach them.</div></div></div>
+      <div class="group"><div class="row"><div class="ic">${I.desktop}</div><div class="main"><div class="t">${esc(S.self.name)} (this PC)</div><div class="d" id="nasDrives">Checking drives…</div></div><div class="end"><button class="btn primary" data-act="nas-setup">${I.check}Use this PC as the NAS</button></div></div>
+      ${others.map(d => `<div class="row"><div class="ic">${I.desktop}</div><div class="main"><div class="t">${esc(d.name)}</div><div class="d">${d.connected ? 'Connected' : 'Offline'} · to use it, open VELS Syndicate on ${esc(d.name)} → ${esc(tabName('nas'))} → Use this PC as the NAS</div></div></div>`).join('')}</div>
+      <div class="small muted" style="margin-top:10px">Tip: a PC that's always on (and a big or external drive) works best. A NAS on one drive isn't a backup: keep a copy of important files somewhere else too.</div></div>`;
+    tryApi(api.nasDrives()).then(r => { const el = $('#nasDrives'); if (el && r.ok) el.textContent = r.value.length ? r.value.map(d => `${d.drive} ${fmtBytes(d.free)} free`).join(' · ') : ''; });
+    return;
+  }
+  if (mode === 'offline') {
+    body.innerHTML = `<div class="card"><div class="empty"><div class="big">${I.nas}</div><h3>${esc(S.nas.elsewhere.name)} is offline</h3><div class="small">The NAS (${esc(S.nas.elsewhere.label)}) is on ${esc(S.nas.elsewhere.name)}. Turn that PC on and open VELS Syndicate to use it.</div>
+      <div class="line" style="justify-content:center;margin-top:14px"><button class="btn" data-act="nas-move-here">Move the NAS to this PC…</button></div></div></div>`;
+    return;
+  }
+  if (mode === 'missing') {
+    body.innerHTML = `<div class="card"><div class="empty"><div class="big">${I.nas}</div><h3>${S.nas.host.missing ? 'The NAS folder is missing' : 'The NAS needs the Pro plan'}</h3><div class="small">${S.nas.host.missing ? `${esc(S.nas.host.root)} can't be found. If it's on a USB drive, plug it back in. Or choose a new folder.` : 'Your files are still in ' + esc(S.nas.host.root) + '.'}</div>
+      <div class="line" style="justify-content:center;margin-top:14px">${S.nas.host.missing ? `<button class="btn primary" data-act="nas-move" data-mode="empty">Choose a new folder…</button>` : `<button class="btn primary" data-act="buy" data-tier="pro">Upgrade to Pro</button>`}<button class="btn danger" data-act="nas-stop">Stop the NAS</button></div></div></div>`;
+    return;
+  }
+  // browse
+  if (nasUI.key !== hostKey) Object.assign(nasUI, { key: hostKey, info: null, dir: '', entries: [], q: '', results: null, sel: new Set(), err: '' });
+  body.innerHTML = `<div class="card nas-space" id="nasSpace"></div>
+    <div class="nas-bar"><div class="crumbs" id="nasCrumbs"></div><input class="field" id="nasQ" placeholder="Search the NAS" value="${esc(nasUI.q)}"></div>
+    <div class="group nas-list" id="nasList"><div class="empty small"><span class="spin"></span> Opening the NAS…</div></div><div id="nasBulk"></div>`;
+  const q = $('#nasQ'); let tmr;
+  q.addEventListener('input', () => { clearTimeout(tmr); tmr = setTimeout(() => { nasUI.q = q.value.trim(); nasUI.q ? nasSearch() : (nasUI.results = null, nasDraw()); }, 250); });
+  nasOpen();
+}
+async function nasOpen() {
+  const r = await tryApi(api.nasOp('open'));
+  if (!r.ok) { nasUI.err = r.error; nasUI.info = null; return nasDraw(); }
+  nasUI.info = r.value; nasUI.err = '';
+  nasLoad();
+}
+async function nasLoad() {
+  if (!nasUI.info) return;
+  const r = await tryApi(api.nasOp('list', { dir: nasUI.dir }));
+  if (!r.ok) { if (nasUI.dir) { nasUI.dir = ''; return nasLoad(); } nasUI.err = r.error; return nasDraw(); }
+  nasUI.entries = r.value.entries; nasUI.err = '';
+  for (const p of [...nasUI.sel]) if (!nasUI.entries.some(e => nasJoin(nasUI.dir, e.name) === p)) nasUI.sel.delete(p);
+  if (nasUI.q) return nasSearch();
+  nasDraw();
+}
+async function nasSearch() {
+  const r = await tryApi(api.nasOp('search', { q: nasUI.q }));
+  nasUI.results = r.ok ? r.value.results : []; nasDraw();
+}
+function nasSpace(sp) {
+  const el = $('#nasSpace'); if (!el || !sp || !sp.total) return;
+  const used = sp.total - sp.free;
+  el.innerHTML = `<div class="nas-sp"><div class="line" style="justify-content:space-between"><b>${fmtBytes(used)} used</b><span class="small muted">${fmtBytes(sp.free)} free of ${fmtBytes(sp.total)}</span></div><div class="bar"><i style="width:${Math.min(100, used / sp.total * 100).toFixed(1)}%"></i></div></div>
+    <div class="small muted nas-hint">${nasCanWrite() ? 'Drag files here to save them on the NAS. ' : ''}Double-click to open.</div>`;
+}
+function nasDraw() {
+  const list = $('#nasList'); if (!list) return;
+  const i = nasUI.info, here = nasHere();
+  const host = here ? S.self.name : S.nas.elsewhere ? S.nas.elsewhere.name : '';
+  const acts = $('#nasActs'), sub = $('#nasSub');
+  if (!i) {
+    acts.innerHTML = '';
+    list.innerHTML = `<div class="empty"><div class="big">${I.lock}</div><h3>Can't open the NAS</h3><div class="small">${esc(nasUI.err || 'Try again in a moment.')}</div><div class="line" style="justify-content:center;margin-top:12px"><button class="btn" data-act="nas-retry">${I.reset}Try again</button></div></div>`;
+    $('#nasCrumbs').innerHTML = ''; return;
+  }
+  const lvl = { full: 'Full', view: 'View only' }[i.level] || i.level;
+  sub.innerHTML = `On <b>${esc(host)}</b>${here ? ' · ' + esc(S.nas.host.root) : ''} · <span class="ok-dot"></span>online · you have <b>${esc(lvl)}</b> access${i.kids ? ' to the Kids folder' : ''}`;
+  acts.innerHTML = `${nasCanWrite() ? `<button class="btn primary" data-act="nas-upload">${I.upload}Upload</button><button class="btn" data-act="nas-mkdir">${I.plus}New folder</button>` : ''}<button class="btn" data-act="nas-bin">${I.trash}Recycle bin</button>${here ? `<button class="btn ghost icon" title="NAS settings" data-act="nas-settings">${I.settings}</button>` : `<button class="btn ghost icon" title="More" data-act="nas-more">${I.settings}</button>`}`;
+  if (!here) nasSpace({ free: i.free, total: i.total });
+  const parts = nasUI.dir ? nasUI.dir.split('/') : [];
+  $('#nasCrumbs').innerHTML = `<button data-nasdir="">${esc(i.kids ? 'Kids' : i.label)}</button>` + parts.map((p, k) => `<span>›</span><button data-nasdir="${esc(parts.slice(0, k + 1).join('/'))}" class="${k === parts.length - 1 ? 'cur' : ''}">${esc(p)}</button>`).join('');
+  const rows = nasUI.results ? nasUI.results.map(r => Object.assign({}, r, { rel: r.path })) : nasUI.entries.map(e => Object.assign({}, e, { rel: nasJoin(nasUI.dir, e.name) }));
+  const w = nasCanWrite();
+  list.innerHTML = rows.length ? rows.map(e => `<div class="nas-row ${nasUI.sel.has(e.rel) ? 'sel' : ''}" data-nasrow="${esc(e.rel)}" data-isdir="${e.dir ? 1 : 0}">
+      <input type="checkbox" data-nassel="${esc(e.rel)}" ${nasUI.sel.has(e.rel) ? 'checked' : ''}>${nasIc(e)}
+      <div class="nas-n"><div class="nm" title="${esc(e.name)}">${esc(e.name)}</div>${nasUI.results ? `<div class="sub">${esc(e.rel.split('/').slice(0, -1).join(' › ') || (i.kids ? 'Kids' : i.label))}</div>` : ''}</div>
+      <div class="sub">${e.dir ? (e.count != null ? e.count + (e.count === 1 ? ' item' : ' items') : 'Folder') : fmtBytes(e.size)}</div><div class="sub">${nasDate(e.at)}</div>
+      <div class="nas-acts">${!e.dir ? (here ? `<button class="btn sm ghost icon" title="Open" data-nas="open" data-p="${esc(e.rel)}">${I.open}</button><button class="btn sm ghost icon" title="Show in folder" data-nas="show" data-p="${esc(e.rel)}">${I.folder}</button>` : `<button class="btn sm" data-nas="get" data-p="${esc(e.rel)}">${I.arrow}Get</button>`) : ''}
+        ${w ? `<button class="btn sm ghost icon" title="Rename" data-nas="rename" data-p="${esc(e.rel)}">${I.edit}</button><button class="btn sm ghost icon danger-ic" title="Delete" data-nas="delete" data-p="${esc(e.rel)}">${I.trash}</button>` : ''}</div></div>`).join('')
+    : `<div class="empty small">${nasUI.results ? 'Nothing matches.' : nasUI.dir ? 'This folder is empty.' : 'The NAS is empty.'}${w && !nasUI.results ? ' Drag files here or press Upload.' : ''}</div>`;
+  $('#nasBulk').innerHTML = nasUI.sel.size ? `<div class="hx-bulk"><b>${nasUI.sel.size} selected</b><span style="flex:1"></span>${here ? '' : `<button class="btn sm" data-nas="get-sel">${I.arrow}Get</button>`}${w ? `<button class="btn sm danger" data-nas="delete-sel">${I.trash}Delete</button>` : ''}<button class="btn sm ghost" data-nas="clear-sel">Clear</button></div>` : '';
+  list.querySelectorAll('[data-nassel]').forEach(c => { c.onclick = e => e.stopPropagation(); c.onchange = () => { c.checked ? nasUI.sel.add(c.dataset.nassel) : nasUI.sel.delete(c.dataset.nassel); nasDraw(); }; });
+  list.querySelectorAll('[data-nasrow]').forEach(r => {
+    r.ondblclick = e => {
+      if (e.target.closest('button,input')) return;
+      if (r.dataset.isdir === '1') { nasUI.dir = r.dataset.nasrow; nasUI.q = ''; nasUI.results = null; const q = $('#nasQ'); if (q) q.value = ''; nasUI.sel.clear(); return nasLoad(); }
+      nasDo(here ? 'open' : 'get', r.dataset.nasrow);
+    };
+    if (r.dataset.isdir === '1') r.onclick = e => { if (!e.target.closest('button,input')) { nasUI.dir = r.dataset.nasrow; nasUI.q = ''; nasUI.results = null; const q = $('#nasQ'); if (q) q.value = ''; nasUI.sel.clear(); nasLoad(); } };
+  });
+  document.querySelectorAll('#nasCrumbs [data-nasdir]').forEach(b => b.onclick = () => { nasUI.dir = b.dataset.nasdir; nasUI.sel.clear(); nasLoad(); });
+  document.querySelectorAll('#nasView [data-nas]').forEach(b => b.onclick = e => { e.stopPropagation(); nasDo(b.dataset.nas, b.dataset.p); });
+}
+async function nasDo(what, rel) {
+  const sel = [...nasUI.sel];
+  if (what === 'clear-sel') { nasUI.sel.clear(); return nasDraw(); }
+  if (what === 'open' || what === 'show') return act(api.nasOpenLocal(rel, what));
+  if (what === 'get' || what === 'get-sel') {
+    const paths = what === 'get' ? [rel] : sel.filter(p => { const e = nasUI.entries.find(x => nasJoin(nasUI.dir, x.name) === p) || (nasUI.results || []).find(x => x.path === p); return e && !e.dir; });
+    if (!paths.length) return toast('Pick files (not folders) to get', 'warn');
+    const r = await act(api.nasOp('get', { paths }));
+    if (r !== undefined) toast(`Getting ${paths.length === 1 ? 'the file' : paths.length + ' files'}. They go to your received files folder.`, 'ok');
+    return;
+  }
+  if (what === 'delete' || what === 'delete-sel') {
+    const paths = what === 'delete' ? [rel] : sel;
+    const name = paths.length === 1 ? `"${paths[0].split('/').pop()}"` : `${paths.length} items`;
+    const bin = nasUI.info.recycle;
+    if (!await confirmBox({ title: `Delete ${name}?`, text: bin ? 'It goes to the NAS recycle bin and is kept for 30 days.' : `The NAS recycle bin is off, so it goes to the Recycle Bin on ${esc(nasHere() ? S.self.name : S.nas.elsewhere.name)}.`, ok: 'Delete', danger: true, icon: 'trash' })) return;
+    const r = await act(api.nasOp('delete', { paths }));
+    if (r) { nasUI.sel.clear(); toast(`Deleted ${r.count} item(s)`, 'ok'); nasLoad(); }
+    return;
+  }
+  if (what === 'rename') {
+    const old = rel.split('/').pop();
+    const name = await textModal({ title: `Rename ${old}`, value: old, ok: 'Rename', icon: I.edit });
+    if (!name || name === old) return;
+    if (await act(api.nasOp('rename', { path: rel, name }))) nasLoad();
+  }
+}
+function textModal({ title, text = '', value = '', ok = 'Save', icon = I.edit }) {
+  return new Promise(resolve => queueModal({ key: 'text', render(el, close) {
+    el.innerHTML = `<div class="m-ico">${icon}</div><h2>${esc(title)}</h2>${text ? `<p>${text}</p>` : ''}<div class="m-field"><input class="field" id="tmIn" maxlength="200" value="${esc(value)}"></div>
+      <div class="btns"><button class="btn" data-x="cancel">Cancel</button><button class="btn primary" data-x="ok">${esc(ok)}</button></div>`;
+    const f = el.querySelector('#tmIn'); f.focus(); const dot = value.lastIndexOf('.'); f.setSelectionRange(0, dot > 0 ? dot : value.length);
+    const done = v => { close(); resolve(v); };
+    f.addEventListener('keydown', e => { if (e.key === 'Enter') done(f.value.trim()); if (e.key === 'Escape') done(null); });
+    el.querySelector('[data-x="cancel"]').onclick = () => done(null);
+    el.querySelector('[data-x="ok"]').onclick = () => done(f.value.trim());
+  } }));
+}
+async function nasUploadPaths(paths) {
+  const r = await act(api.nasUpload(paths, nasUI.dir));
+  if (!r) return;
+  if (r.local) { toast(`Saved ${r.count} item(s) to the NAS`, 'ok'); nasLoad(); }
+  else toast('Saving to the NAS. Watch it in Files.', 'ok');
+}
+// the setup / move dialog: folder, drive space, the three switches
+function nasFolderModal({ title, okText, mode, from }) {
+  return new Promise(resolve => queueModal({ key: 'nas-folder', render(el, close) {
+    const st = { root: '', recycle: true, awake: true, askNew: true, copy: 'copy' };
+    const tog = (k, t, d) => `<div class="set-row"><div class="k"><b>${t}</b><small>${d}</small></div><button class="toggle ${st[k] ? 'on' : ''}" data-tg="${k}"></button></div>`;
+    const draw = () => {
+      el.innerHTML = `<div class="m-ico">${I.folder}</div><h2>${esc(title)}</h2><p>Everything in this folder can be reached by the PCs and phones you allow.</p>
+        <div class="line nas-pick"><input class="field" id="nfRoot" placeholder="D:\\Family Files" value="${esc(st.root)}"><button class="btn" data-x="browse">${I.folder}Browse…</button></div>
+        <div id="nfDrive" class="small muted" style="text-align:left;margin:6px 0 4px"></div>
+        ${mode === 'setup' ? `<div style="text-align:left">${tog('recycle', 'Recycle bin', 'Deleted files are kept 30 days before they\'re gone')}${tog('awake', 'Keep this PC awake', 'Stops sleep while the NAS is on (the screen can still turn off)')}${tog('askNew', 'Ask before new devices can use it', `${S.self.main.mainId ? 'The main PC chooses' : 'You choose'} Full, View only or No access`)}</div>`
+        : `<div class="seg nas-copy" style="margin:10px 0"><button class="${st.copy === 'copy' ? 'on' : ''}" data-cp="copy">Copy everything over</button><button class="${st.copy === 'empty' ? 'on' : ''}" data-cp="empty">Start empty</button></div>
+           <p class="small muted">${st.copy === 'copy' ? `Every file on the NAS is copied to the new folder${from ? ' over the network' : ''}. The old folder is left as it is.` : 'The new NAS starts empty. The old files stay where they are.'}</p>`}
+        <div class="btns"><button class="btn" data-x="cancel">Cancel</button><button class="btn primary" data-x="ok" ${st.root ? '' : 'disabled'}>${I.check}${esc(okText)}</button></div>`;
+      addCloseX(el);
+      const rootIn = el.querySelector('#nfRoot');
+      rootIn.oninput = () => { st.root = rootIn.value.trim(); el.querySelector('[data-x="ok"]').disabled = !st.root; driveInfo(); };
+      el.querySelector('[data-x="browse"]').onclick = async () => { const r = await tryApi(api.nasPickFolder(title)); if (r.ok && r.value) { st.root = r.value; draw(); } };
+      el.querySelectorAll('[data-tg]').forEach(b => b.onclick = () => { st[b.dataset.tg] = !st[b.dataset.tg]; b.classList.toggle('on', st[b.dataset.tg]); });
+      el.querySelectorAll('[data-cp]').forEach(b => b.onclick = () => { st.copy = b.dataset.cp; draw(); });
+      el.querySelector('[data-x="cancel"]').onclick = () => { close(); resolve(null); };
+      el.querySelector('[data-x="ok"]').onclick = () => { close(); resolve(Object.assign({}, st)); };
+      driveInfo();
+    };
+    const driveInfo = async () => {
+      const box = el.querySelector('#nfDrive'); if (!box) return;
+      const m = /^([a-z]:)/i.exec(st.root); if (!m) { box.innerHTML = ''; return; }
+      const r = await tryApi(api.nasDrives()); const d = r.ok && r.value.find(x => x.drive.toLowerCase() === m[1].toLowerCase());
+      box.innerHTML = d ? `<div class="bar"><i style="width:${((d.total - d.free) / d.total * 100).toFixed(1)}%"></i></div>Drive ${esc(d.drive)} · ${fmtBytes(d.free)} free of ${fmtBytes(d.total)}` : `Drive ${esc(m[1])} not found`;
+    };
+    draw();
+  } }));
+}
+async function nasSetupFlow() {
+  const st = await nasFolderModal({ title: 'Choose the NAS folder', okText: 'Start the NAS', mode: 'setup' });
+  if (!st) return;
+  const go = () => api.nasSetup(st.root, { recycle: st.recycle, awake: st.awake, askNew: st.askNew });
+  const r = await tryApi(go());
+  if (!r.ok && /Locked/.test(r.error)) return askPasscodeThen(async () => { if (await act(go())) toast('The NAS is on', 'ok'); });
+  if (!r.ok) return toast(r.error, 'err', 5200);
+  toast('The NAS is on. Other PCs and phones can use it now.', 'ok');
+}
+async function nasMoveFlow(here) {
+  const st = await nasFolderModal({ title: here ? 'Move the NAS to another folder' : 'Move the NAS to this PC', okText: 'Move the NAS', mode: 'move', from: !here });
+  if (!st) return;
+  if (here) { const r = await act(api.nasMove(st.root, st.copy)); if (r) toast('The NAS moved', 'ok'); return; }
+  let pin = null;
+  if (S.self.main.mainId && !S.self.main.isMain) { pin = await askPasscode('Move the NAS', 'Enter the main PC passcode to move the NAS to this PC.'); if (pin == null) return; }
+  toast(`Asking ${S.nas.elsewhere.name}…`, 'info');
+  const r = await act(api.nasTakeOver(st.root, st.copy, pin));
+  if (r) toast(st.copy === 'copy' ? 'This PC is now the NAS. The files are being copied over (watch it in Files).' : 'This PC is now the NAS', 'ok', 6000);
+}
+function nasSettingsModal() {
+  queueModal({ key: 'nas-settings', render(el, close) {
+    const draw = () => {
+      const h = S.nas.host; if (!h) return close();
+      const lv = { full: 'Full', view: 'View only', none: 'No access', ask: 'Ask' };
+      el.classList.add('hx-big', 'nas-set');
+      el.innerHTML = `<div class="m-ico">${I.nas}</div><h2>NAS settings</h2><p class="hx-lead">${esc(h.root)}</p>
+        <div class="group" style="padding:0 14px">${[['recycle', 'Recycle bin', 'Deleted files are kept 30 days before they\'re gone'], ['awake', 'Keep this PC awake', 'Stops sleep while the NAS is on'], ['askNew', 'Ask before new devices can use it', 'Otherwise new PCs get Full access']].map(([k, t, d]) => `<div class="set-row"><div class="k"><b>${t}</b><small>${d}</small></div><button class="toggle ${h[k] ? 'on' : ''}" data-tg="${k}"></button></div>`).join('')}</div>
+        <div class="label" style="margin:16px 2px 8px">Who can use it</div>
+        <div class="group">${h.access.length ? h.access.map(a => `<div class="row"><div class="ic">${I.desktop}</div><div class="main"><div class="t">${esc(a.name)}</div><div class="d">${a.kids ? 'Kids folder only' : 'The whole NAS'}</div></div>
+          <div class="end"><select class="field sm" data-acc="${esc(a.id)}">${['full', 'view', 'none', 'ask'].map(l => `<option value="${l}" ${a.level === l ? 'selected' : ''}>${lv[l]}</option>`).join('')}</select>
+          <label class="small nas-kidchk"><input type="checkbox" data-kid="${esc(a.id)}" ${a.kids ? 'checked' : ''}> Kids only</label></div></div>`).join('') : '<div class="empty small">No other PCs yet.</div>'}
+          <div class="row"><div class="ic">${I.phone}</div><div class="main"><div class="t">Phones and tablets</div><div class="d">Phones connected to this PC have Full access</div></div></div></div>
+        <div class="btns" style="justify-content:space-between"><button class="btn danger" data-x="stop">Stop the NAS</button><span style="flex:1"></span><button class="btn" data-x="move">Move the NAS…</button><button class="btn primary" data-x="done">Done</button></div>`;
+      addCloseX(el);
+      const wrap = p => tryApi(p).then(r => { if (!r.ok && /Locked/.test(r.error)) askPasscodeThen(() => {}); else if (!r.ok) toast(r.error, 'err'); return r; });
+      el.querySelectorAll('[data-tg]').forEach(b => b.onclick = async () => { const o = {}; o[b.dataset.tg] = !h[b.dataset.tg]; await wrap(api.nasUpdate(o)); setTimeout(draw, 450); });
+      const setAcc = id => wrap(api.nasSetAccess(id, el.querySelector(`[data-acc="${id}"]`).value, el.querySelector(`[data-kid="${id}"]`).checked)).then(() => setTimeout(draw, 450));
+      el.querySelectorAll('[data-acc]').forEach(s => s.onchange = () => setAcc(s.dataset.acc));
+      el.querySelectorAll('[data-kid]').forEach(c => c.onchange = () => setAcc(c.dataset.kid));
+      el.querySelector('[data-x="done"]').onclick = close;
+      el.querySelector('[data-x="move"]').onclick = () => { close(); nasMoveFlow(true); };
+      el.querySelector('[data-x="stop"]').onclick = async () => { close(); if (await confirmBox({ title: 'Stop the NAS?', text: `Other PCs and phones won't see it anymore. The files stay in ${esc(h.root)}.`, ok: 'Stop the NAS', danger: true })) act(api.nasStop()); };
+    };
+    draw();
+  } });
+}
+function nasBinModal() {
+  queueModal({ key: 'nas-bin', render(el, close) {
+    const draw = async () => {
+      const r = await tryApi(api.nasOp('bin'));
+      const items = r.ok ? r.value.items : [];
+      el.classList.add('hx-big');
+      el.innerHTML = `<div class="m-ico">${I.trash}</div><h2>NAS recycle bin</h2><p class="hx-lead">Deleted files are kept 30 days, then removed for good.</p>
+        <div class="group hx-list">${!r.ok ? `<div class="empty small">${esc(r.error)}</div>` : items.length ? items.map(x => `<div class="row"><div class="main"><div class="t">${esc(x.name)}</div><div class="d">From ${esc(x.from.split('/').slice(0, -1).join(' › ') || 'the top folder')} · deleted ${ago(x.at)}${x.by ? ' by ' + esc(x.by) : ''} · ${x.left} day${x.left === 1 ? '' : 's'} left</div></div>
+          <div class="end">${nasCanWrite() ? `<button class="btn sm" data-rs="${esc(x.id)}">${I.reset}Restore</button><button class="btn sm ghost icon danger-ic" title="Delete for good" data-pg="${esc(x.id)}">${I.trash}</button>` : ''}</div></div>`).join('') : '<div class="empty small">The recycle bin is empty.</div>'}</div>
+        <div class="btns">${items.length && nasCanWrite() ? `<button class="btn danger" data-x="empty">Empty the bin</button>` : ''}<button class="btn primary" data-x="done">Done</button></div>`;
+      addCloseX(el);
+      el.querySelectorAll('[data-rs]').forEach(b => b.onclick = async () => { if (await act(api.nasOp('restore', { ids: [b.dataset.rs] }))) { draw(); nasLoad(); } });
+      el.querySelectorAll('[data-pg]').forEach(b => b.onclick = async () => { if (await act(api.nasOp('purge', { ids: [b.dataset.pg] }))) draw(); });
+      const em = el.querySelector('[data-x="empty"]'); if (em) em.onclick = async () => { if (await act(api.nasOp('purge', { ids: 'all' }))) draw(); };
+      el.querySelector('[data-x="done"]').onclick = close;
+    };
+    draw();
+  } });
+}
+function nasAccessAskHtml(d) {
+  return `<div class="m-ico">${I.lock}</div><h2>${esc(d.peerName)} wants to use the NAS</h2>
+    <p>What can ${esc(d.peerName)} do with <b>${esc(d.label || 'the NAS')}</b>? You can change this any time in ${esc(tabName('nas'))} → NAS settings.</p>
+    <div class="nas-lv">${[['full', I.check, 'Full', 'Open, save, rename and delete'], ['view', I.open, 'View only', 'Open and download, no changes'], ['none', I.lock, 'No access', 'Can\'t see the NAS']].map(([l, ic, t, s]) => `<button class="${l === 'view' ? 'on' : ''}" data-lvl="${l}">${ic}<b>${t}</b><span>${s}</span></button>`).join('')}</div>
+    <label class="nas-kidchk" style="justify-content:center;margin:10px 0"><input type="checkbox" id="nasAskKids"> Only the <b>&nbsp;Kids&nbsp;</b> folder (a kid's PC sees just that folder)</label>
+    <div class="btns"><button class="btn" data-x="later">Decide later</button><button class="btn primary" data-x="allow">${I.check}Save</button></div>`;
+}
+
+// ---------- file history (Office → a PC → File history) ----------
+const fhPins = {}; // passcode typed for this window session (kept in memory only)
+async function openFileHistory(peerId) {
+  let pin = null;
+  if (S.self.main.mainId) {
+    if (S.self.main.isMain && !S.self.main.locked) pin = null;
+    else {
+      pin = fhPins.pin || await askPasscode('File history is protected', `Enter the main PC passcode to see what ${nameOf(peerId)} sent and received.`);
+      if (pin == null) return;
+      fhPins.pin = pin;
+    }
+  }
+  let list;
+  try { list = await api.fileHistory(peerId, pin); }
+  catch (e) { if (/passcode|Wrong/i.test(e.message)) delete fhPins.pin; return toast(e.message, 'err', 5200); }
+  const st = { peerId, pin, list, dir: 'all', range: 0, q: '', sel: new Set() };
+  queueModal({ key: 'fh:' + peerId, render(el, close) { el.classList.add('hx-big'); st.el = el; st.close = close; renderFileHistory(st); } });
+}
+async function refreshFileHistory(st) {
+  try { st.list = await api.fileHistory(st.peerId, st.pin); st.sel.clear(); renderFileHistory(st); } catch (e) { toast(e.message, 'err'); }
+}
+function renderFileHistory(st) {
+  const el = st.el, who = nameOf(st.peerId);
+  const cut = st.range ? Date.now() - st.range * 86400000 : 0;
+  const rows = st.list.filter(r => (st.dir === 'all' || r.dir === st.dir) && r.at >= cut && (!st.q || r.name.toLowerCase().includes(st.q)));
+  const there = r => r.where === 'here' || r.where === 'original';
+  const where = r => ({ here: `On ${who}`, original: `On ${who} · original`, gone: 'No copy left', deleted: `Deleted on ${who} (Recycle Bin)` }[r.where]) + (r.hereToo ? ' · also on this PC' : '');
+  const other = r => r.otherIsMe ? 'This PC' : r.other;
+  const kind = n => { const e = (n.split('.').pop() || '').toLowerCase(); return /^(jpe?g|png|gif|heic|webp|bmp)$/.test(e) ? 'img' : /^(mp4|mov|mkv|avi|webm|m4v)$/.test(e) ? 'vid' : /^(mp3|m4a|wav|flac|aac|ogg)$/.test(e) ? 'aud' : 'doc'; };
+  const acts = r => [
+    r.hereToo ? `<button class="btn sm" data-fh="open" data-id="${esc(r.id)}">${I.open}Open</button><button class="btn sm ghost icon" title="Show in folder" data-fh="show" data-id="${esc(r.id)}">${I.folder}</button>` : '',
+    there(r) && !r.hereToo ? `<button class="btn sm" data-fh="copy" data-id="${esc(r.id)}">${I.arrow}Get a copy</button>` : '',
+    there(r) || r.hereToo ? `<button class="btn sm ghost icon" title="Send again" data-fh="send" data-id="${esc(r.id)}">${I.send}</button>` : '',
+    r.where === 'here' && r.dir === 'in' ? `<button class="btn sm ghost icon danger-ic" title="Delete on ${esc(who)}" data-fh="delete" data-id="${esc(r.id)}">${I.trash}</button>` : '',
+  ].join('') || '<span class="small muted">No copy left</span>';
+  const prevQ = el.querySelector('#fhQ');
+  const focus = prevQ && document.activeElement === prevQ;
+  el.innerHTML = `<div class="m-ico">${I.clock}</div><h2>${esc(who)} · File history</h2>
+    <p class="hx-lead">Everything ${esc(who)} sent or received, with any PC or phone.</p>
+    <div class="hx-filters"><div class="seg">${[['all', 'All'], ['out', `Sent by ${esc(who)}`], ['in', 'Received']].map(([v, l]) => `<button class="${st.dir === v ? 'on' : ''}" data-fhdir="${v}">${l}</button>`).join('')}</div>
+      <div class="seg">${[[0, 'Any time'], [7, '7 days'], [30, '30 days']].map(([v, l]) => `<button class="${st.range === v ? 'on' : ''}" data-fhrange="${v}">${l}</button>`).join('')}</div>
+      <input class="field" id="fhQ" placeholder="Search names" value="${esc(st.q)}"><button class="btn sm ghost icon" title="Refresh" data-fh="refresh">${I.reset}</button></div>
+    <div class="group hx-list">${rows.length ? rows.map(r => `<div class="hx-row ${st.sel.has(r.id) ? 'sel' : ''}"><input type="checkbox" data-fhsel="${esc(r.id)}" ${st.sel.has(r.id) ? 'checked' : ''}>
+      <div class="hx-ic k-${kind(r.name)}">${({ img: I.image, vid: I.video, aud: I.music, doc: I.doc })[kind(r.name)]}</div>
+      <div class="hx-n"><div class="nm" title="${esc(r.name)}">${esc(r.name)}</div><div class="sub ${r.where === 'gone' || r.where === 'deleted' ? 'gone' : 'ok'}">${esc(where(r))}</div></div>
+      <div class="hx-dir">${r.dir === 'out' ? `<b>${esc(who)}</b> → ${esc(other(r))}` : `${esc(other(r))} → <b>${esc(who)}</b>`}</div>
+      <div class="sub">${fmtBytes(r.size)}</div><div class="sub">${ago(r.at)}</div><div class="hx-acts">${acts(r)}</div></div>`).join('')
+      : `<div class="empty small">${st.list.length ? 'Nothing matches.' : `${esc(who)} hasn't sent or received files yet.`}</div>`}</div>
+    ${st.sel.size ? `<div class="hx-bulk"><b>${st.sel.size} selected</b><span style="flex:1"></span><button class="btn sm" data-fh="copy-sel">${I.arrow}Get copies</button><button class="btn sm" data-fh="send-sel">${I.send}Send again…</button><button class="btn sm danger" data-fh="delete-sel">${I.trash}Delete on ${esc(who)}</button><button class="btn sm ghost" data-fh="clear-sel">Clear</button></div>` : ''}`;
+  addCloseX(el);
+  const q = el.querySelector('#fhQ');
+  q.addEventListener('input', () => { st.q = q.value.trim().toLowerCase(); renderFileHistory(st); });
+  if (focus) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+  el.querySelectorAll('[data-fhdir]').forEach(b => b.onclick = () => { st.dir = b.dataset.fhdir; renderFileHistory(st); });
+  el.querySelectorAll('[data-fhrange]').forEach(b => b.onclick = () => { st.range = +b.dataset.fhrange; renderFileHistory(st); });
+  el.querySelectorAll('[data-fhsel]').forEach(c => c.onchange = () => { c.checked ? st.sel.add(c.dataset.fhsel) : st.sel.delete(c.dataset.fhsel); renderFileHistory(st); });
+  el.querySelectorAll('[data-fh]').forEach(b => b.onclick = () => fileHistoryDo(st, b.dataset.fh, b.dataset.id));
+}
+async function fileHistoryDo(st, what, id) {
+  const who = nameOf(st.peerId);
+  const pick = id ? [st.list.find(r => r.id === id)].filter(Boolean) : st.list.filter(r => st.sel.has(r.id));
+  if (what === 'refresh') return refreshFileHistory(st);
+  if (what === 'clear-sel') { st.sel.clear(); return renderFileHistory(st); }
+  if (what === 'open' || what === 'show') return act(api.openTransfer(id, what));
+  const base = what.replace('-sel', '');
+  if (base === 'copy') {
+    const ids = pick.filter(r => (r.where === 'here' || r.where === 'original') && !r.hereToo).map(r => r.id);
+    if (!ids.length) return toast('Those files are already on this PC, or there is no copy left', 'warn');
+    const r = await act(api.fileHistoryAct(st.peerId, 'copy', ids, null, st.pin));
+    if (r) toast(`${who} is sending ${r.count === 1 ? 'the file' : r.count + ' files'}. Watch it in Files.`, 'ok');
+    return;
+  }
+  if (base === 'delete') {
+    const rows = pick.filter(r => r.where === 'here' && r.dir === 'in');
+    if (!rows.length) return toast(`Only files ${who} received can be deleted from here`, 'warn');
+    if (!await confirmBox({ title: `Delete ${rows.length === 1 ? `"${rows[0].name}"` : rows.length + ' files'} on ${who}?`, text: `They go to ${who}'s Recycle Bin, so they can still be restored there. ${who} shows a note that you deleted them.`, ok: `Delete on ${who}`, danger: true, icon: 'trash' })) return;
+    const r = await act(api.fileHistoryAct(st.peerId, 'delete', rows.map(r => r.id), null, st.pin));
+    if (r) { toast(`Deleted ${r.count} file(s) on ${who}`, 'ok'); refreshFileHistory(st); }
+    return;
+  }
+  if (base === 'send') {
+    const local = pick.filter(r => r.hereToo), remote = pick.filter(r => !r.hereToo && (r.where === 'here' || r.where === 'original'));
+    if (!local.length && !remote.length) return toast('There is no copy of those files left to send', 'warn');
+    const target = await pickSendTarget(pick.map(r => r.name), { phones: !remote.length, exclude: remote.length ? st.peerId : null });
+    if (!target) return;
+    if (local.length) await act(api.resendLocal(local.map(r => r.id), target));
+    if (remote.length) await act(api.fileHistoryAct(st.peerId, 'send', remote.map(r => r.id), target, st.pin));
+    toast('Sending. Watch it in Files.', 'ok');
+  }
+}
+function pickSendTarget(names, opts = {}) {
+  const pcs = S.devices.filter(d => d.paired && d.connected && d.id !== opts.exclude);
+  const phones = opts.phones ? (S.phones || []) : [];
+  return new Promise(resolve => queueModal({ key: 'send-target', render(el, close) {
+    let pick = (pcs[0] || phones[0] || {}).id || null;
+    const draw = () => {
+      el.innerHTML = `<div class="m-ico">${I.send}</div><h2>Send again</h2><p>Send ${names.length === 1 ? `<b>${esc(names[0])}</b>` : `<b>${names.length} files</b>`} to:</p>
+        <div class="targets" style="justify-content:center;margin:12px 0">${pcs.map(d => `<button class="target ${pick === d.id ? 'on' : ''}" data-t="${esc(d.id)}"><span class="dot ${d.status}"></span>${esc(d.name)}</button>`).join('')}${phones.map(p => `<button class="target ${pick === p.id ? 'on' : ''}" data-t="${esc(p.id)}"><span class="dot ${p.online ? 'Idle' : 'Offline'}"></span><span class="tic">${I.phone}</span>${esc(p.name)}</button>`).join('') || ''}${!pcs.length && !phones.length ? '<span class="muted small">No PC is online to send to.</span>' : ''}</div>
+        <div class="btns"><button class="btn" data-x="cancel">Cancel</button><button class="btn primary" data-x="ok" ${pick ? '' : 'disabled'}>${I.send}Send</button></div>`;
+      addCloseX(el);
+      el.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { pick = b.dataset.t; draw(); });
+      el.querySelector('[data-x="cancel"]').onclick = () => { close(); resolve(null); };
+      el.querySelector('[data-x="ok"]').onclick = () => { close(); resolve(pick); };
+    };
+    draw();
+  } }));
+}
+function askPasscodeThen(fn) { askPasscode('Main PC passcode', 'This is protected. Enter the main PC passcode (unlocks for 10 minutes).').then(p => { if (p != null) fn(); }); }
+function askModal(a) {
+  upsertModal('ask:' + a.reqId, a, (el, close, d) => {
+    if (d.kind === 'tabs') {
+      const changes = Object.keys(TAB_DEFAULTS).filter(k => (d.names[k] || '') !== '').map(k => `<div class="row"><div class="main"><div class="t">${esc(TAB_DEFAULTS[k])} → <b>${esc(d.names[k])}</b></div></div></div>`).join('') || `<div class="row"><div class="main"><div class="t">Back to the default names</div></div></div>`;
+      el.innerHTML = `<div class="m-ico">${I.family}</div><h2>${esc(d.peerName)} wants to rename tabs</h2><p>${esc(d.peerName)} would like these names on <b>${esc(d.peerName)}</b> only:</p>
+        <div class="group" style="text-align:left;margin:10px 0">${changes}</div>
+        <div class="btns"><button class="btn danger" data-x="deny">Deny</button><button class="btn primary" data-x="allow">${I.check}Allow</button></div>`;
+    } else if (d.kind === 'files') {
+      const verb = { copy: `wants a copy of ${d.count === 1 ? 'a file' : d.count + ' files'} from this PC`, send: `wants this PC to send ${d.count === 1 ? 'a file' : d.count + ' files'} to ${esc(d.targetName || 'another PC')}`, delete: `wants to delete ${d.count === 1 ? 'a file' : d.count + ' files'} on this PC (they go to the Recycle Bin)`, nasmove: `wants to move the NAS to ${esc(d.targetName)}${d.mode === 'copy' ? ' and copy all the files there' : ''}. The files stay on this PC too.` }[d.action] || 'is asking about files';
+      el.innerHTML = `<div class="m-ico">${d.action === 'delete' ? I.trash : I.files}</div><h2>${esc(d.peerName)} ${verb}</h2>
+        <div class="group" style="text-align:left;margin:10px 0">${(d.names || []).slice(0, 8).map(n => `<div class="row"><div class="main"><div class="t">${esc(n)}</div></div></div>`).join('')}${d.count > 8 ? `<div class="row"><div class="main"><div class="d">and ${d.count - 8} more</div></div></div>` : ''}</div>
+        <div class="btns"><button class="btn danger" data-x="deny">Deny</button><button class="btn ${d.action === 'delete' ? 'danger' : 'primary'}" data-x="allow">${d.action === 'delete' ? I.trash + 'Delete' : I.check + 'Allow'}</button></div>`;
+    } else if (d.kind === 'nas') {
+      el.innerHTML = nasAccessAskHtml(d);
+      el.querySelectorAll('[data-lvl]').forEach(b => b.onclick = () => { el.querySelectorAll('[data-lvl]').forEach(x => x.classList.toggle('on', x === b)); });
+      el.querySelector('[data-x="allow"]').onclick = async () => {
+        const lvl = (el.querySelector('[data-lvl].on') || {}).dataset.lvl || 'view';
+        try { await api.answerAsk(d.reqId, 'nas', lvl !== 'none', { level: lvl, kids: !!(el.querySelector('#nasAskKids') || {}).checked }); close(); } catch (e) { if (/Locked/.test(e.message)) askPasscodeThen(() => el.querySelector('[data-x="allow"]').click()); else toast(e.message, 'err'); }
+      };
+      el.querySelector('[data-x="later"]').onclick = () => { act(api.answerAsk(d.reqId, 'nas', false, { level: 'later' })); close(); };
+      return;
+    }
+    el.querySelector('[data-x="deny"]').onclick = () => { act(api.answerAsk(d.reqId, d.kind, false)); close(); };
+    el.querySelector('[data-x="allow"]').onclick = () => { act(api.answerAsk(d.reqId, d.kind, true)); close(); };
+  });
 }
 
 Views.settings = {
@@ -381,6 +850,9 @@ Views.settings = {
         <div class="set-row"><div class="k"><b>Accent color</b></div><div class="swatches">${Object.entries(ACCENTS).map(([k, c]) => `<button class="sw ${s.accent === k ? 'on' : ''}" style="background:${c}" title="${ACCENT_NAMES[k] || k}" data-act="set" data-k="accent" data-v="${k}"></button>`).join('')}</div></div>
         <div class="set-row"><div class="k"><b>Glass</b><small>Picked automatically for this system</small></div><span class="muted small">${blurText}</span></div>
       </div>
+      <h2 class="sec">Tab names <span class="sec-note">${S.self.monitor && S.self.monitor.enabled && !S.self.main.isMain ? 'new names are sent to the main PC for approval' : 'your names for the tabs on this PC · icons stay the same'}</span></h2>
+      <div class="group" id="tabNames">${tabNameRows()}</div>
+      <div class="line" style="margin:8px 2px 0;justify-content:space-between"><span class="small muted">Up to 16 characters. Leave a box empty to use the default. Hover a renamed tab to see its default name.</span><button class="btn sm" data-act="tabs-reset-all">${I.reset}Reset all to default</button></div>
       <h2 class="sec">Security</h2><div class="group">
         <div class="set-row"><div class="k"><b>Accept new connection requests</b><small>Turn off to stop other PCs from asking for access. Paired PCs still connect.</small></div>${tog('allowPairing', s.allowPairing !== false)}</div>
         <div class="set-row"><div class="k"><b>Local network only</b><small>Refuse connections from outside your home network (VPN ranges such as Tailscale still work)</small></div>${tog('lanOnly', s.lanOnly !== false)}</div>
@@ -415,6 +887,7 @@ Views.settings = {
       </div>`;
     const commit = (id, fn) => { const inp = $(id); inp.addEventListener('change', fn); inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); }); };
     commit('#sName', () => act(api.settings({ name: $('#sName').value.trim() })));
+    root.querySelectorAll('[data-tab-key]').forEach(inp => commit('#' + inp.id, () => saveTabNames()));
     commit('#sRole', () => act(api.setStatus(null, null, $('#sRole').value.trim())));
   },
 };
@@ -780,7 +1253,7 @@ const nextTier = tier => { const o = S.plan.tiers.map(t => t.tier); return o[o.i
 const tierName = tier => (S.plan.tiers.find(t => t.tier === tier) || {}).name || tier;
 function planCompare(p) {
   return `<div class="plans">${p.tiers.map(t => `<div class="plan-col ${t.tier === p.tier ? 'on' : ''}" data-act="plan-info" data-tier="${t.tier}" title="More about ${esc(t.name)}">
-    <b>${esc(t.name)}</b>${planPrice(p.license, t.tier) ? `<span class="price">${esc(planPrice(p.license, t.tier))}</span>` : ''}<span>${t.pcs} linked PCs</span><span>Files ${fmtLimit(t.maxFileBytes)}</span>${t.commercial ? '<span>Business use</span>' : ''}
+    <b>${esc(t.name)}</b>${planPrice(p.license, t.tier) ? `<span class="price">${esc(planPrice(p.license, t.tier))}</span>` : ''}<span>${t.pcs} linked PCs</span><span>Files ${fmtLimit(t.maxFileBytes)}</span>${t.nas ? '<span>Home NAS</span>' : ''}${t.commercial ? '<span>Business use</span>' : ''}
     ${t.tier === p.tier ? '<em>Current plan</em>' : t.tier !== 'free' ? `<button class="btn sm primary" data-act="buy" data-tier="${t.tier}">Get ${esc(t.name)}${I.arrow}</button>` : ''}
     <span class="more">Details ›</span></div>`).join('')}</div>`;
 }
@@ -790,6 +1263,7 @@ function planFeatures(t) {
   const files = t.maxFileBytes == null ? 'Send files of any size' : `Send files ${fmtLimit(t.maxFileBytes)} each`;
   const f = [prev ? `Everything in ${prev.name}` : 'Connect your PCs, run tasks and share files',
     `Link up to ${t.pcs} other PCs`, `Family: live status and history for up to ${t.kids} kids' PCs`, files];
+  if (t.nas && !(prev && prev.nas)) f.push('Home NAS: one shared folder for every PC and phone, with a recycle bin and a Kids folder');
   if (t.tier === 'free') f.push('For personal and family use');
   else {
     f.push(t.commercial ? 'Allowed for use in a business' : 'For personal and family use');
@@ -918,7 +1392,8 @@ function updateSheet() {
   $('#shPresets').innerHTML = presetsFor(plat).map(p => `<span class="chip" data-act="sh-preset" data-i="${p.i}">${esc(p.name)}</span>`).join('');
   const tasks = S.tasks.filter(t => t.peerId === d.id && t.direction !== 'in').slice(0, 4);
   $('#shTasks').innerHTML = tasks.length ? `<div class="label">Recent tasks</div><div class="stack">${tasks.map(taskItem).join('')}</div>` : '';
-  $('#shFiles').innerHTML = d.isSelf ? '' : `<div class="label">Files</div><div class="line"><button class="btn" data-act="pick-files" data-id="${esc(d.id)}" ${d.connected ? '' : 'disabled'}>${I.upload}Send files…</button><button class="btn" data-act="pick-folder" data-id="${esc(d.id)}" ${d.connected ? '' : 'disabled'}>${I.folder}Send folder…</button><span class="small muted">or drop files on this window</span></div>`;
+  $('#shFiles').innerHTML = d.isSelf ? '' : `<div class="label">Files</div><div class="line"><button class="btn" data-act="pick-files" data-id="${esc(d.id)}" ${d.connected ? '' : 'disabled'}>${I.upload}Send files…</button><button class="btn" data-act="pick-folder" data-id="${esc(d.id)}" ${d.connected ? '' : 'disabled'}>${I.folder}Send folder…</button><button class="btn primary" data-act="file-history" data-id="${esc(d.id)}" ${d.connected ? '' : 'disabled title="That PC is offline"'}>${I.clock}File history</button></div>
+    <div class="small muted" style="margin-top:6px">Drop files on this window to send them. File history shows everything ${esc(d.name)} sent or received${S.self.main.mainId ? ' · needs the main PC passcode' : ''}.</div>`;
   const rows = st ? [
     ['Processor', `${st.cpuModel} · ${st.cores} threads`], ['CPU', st.cpu + '%'],
     ['Memory', `${fmtBytes(st.ramUsed)} of ${fmtBytes(st.ramTotal)}`],
@@ -957,7 +1432,7 @@ function pumpModal() {
 // own Cancel / Decline / Deny / Decide later button, so nothing is left half-done.
 const DISMISS_BTNS = ['cancel', 'no', 'later', 'deny', 'close'];
 // requests from another PC aren't dismissed by a stray click outside the window (only X or Esc)
-const ASKS_FROM_OTHERS = /^(pair:|task:|files:)/;
+const ASKS_FROM_OTHERS = /^(pair:|task:|files:|ask:|phone$)/;
 function addCloseX(el) {
   if (el.querySelector(':scope > .m-x')) return;
   const b = document.createElement('button');
@@ -989,6 +1464,77 @@ function confirmBox({ title, text, ok = 'OK', danger = false, icon = '' }) {
     el.querySelector('[data-x="no"]').onclick = () => { close(); resolve(false); };
     el.querySelector('[data-x="ok"]').onclick = () => { close(); resolve(true); };
   } }));
+}
+
+// ---------- phones and tablets ----------
+let phonePair = null, phoneTimer = null;
+async function phoneConnectModal() {
+  let pair;
+  try { pair = await api.phoneConnect(); } catch (e) { return toast(e.message, 'warn'); }
+  phonePair = pair;
+  upsertModal('phone', { stage: 'qr', pair }, renderPhoneModal);
+}
+function phoneAskModal(r) {
+  if (!phonePair || phonePair.sid !== r.sid) return;
+  upsertModal('phone', { stage: 'ask', req: r }, renderPhoneModal);
+}
+function renderPhoneModal(el, close, d) {
+  clearInterval(phoneTimer);
+  const done = () => { clearInterval(phoneTimer); phonePair = null; close(); };
+  if (d.stage === 'qr') {
+    const p = d.pair;
+    el.innerHTML = `<div class="m-ico">${I.phone}</div><h2>Connect a phone or tablet</h2><p>Works with iPhone, iPad and Android. Nothing to install.</p>
+      <div class="qr-wrap"><div><div class="qr" id="qrBox">${p.qr}</div><div class="small muted qr-exp" id="qrExp"></div></div>
+        <ol class="qr-steps"><li>Open the <b>Camera</b> app on the phone</li><li>Point it at this code</li><li>Tap the <b>VELS</b> link that pops up</li><li>Click <b>Allow</b> here on this PC</li></ol></div>
+      <div class="waiting-note"><span class="spin"></span>The phone must be on the same Wi-Fi as ${esc(S.self.name)}</div>
+      <div class="small muted qr-alt">Can't scan? In Safari or Chrome go to <b class="sel">${esc(p.address)}</b> and type <b class="sel">${esc(p.code)}</b></div>
+      <div class="small muted qr-alt">Page won't open on the phone? <span class="link" data-x="fw">Allow VELS through the Windows firewall</span></div>
+      <div class="btns"><button class="btn" data-x="cancel">Cancel</button></div>`;
+    el.querySelector('[data-x="cancel"]').onclick = () => { act(api.phoneCancel(p.sid)); done(); };
+    el.querySelector('[data-x="fw"]').onclick = () => act(api.firewall().then(r => toast(r && r.ok ? 'Firewall updated. Scan the code again.' : (r && r.error) || 'The firewall was not changed', r && r.ok ? 'ok' : 'warn')));
+    const tick = () => {
+      const left = Math.max(0, Math.round((p.expiresAt - Date.now()) / 1000));
+      const box = el.querySelector('#qrExp'); if (!box) return clearInterval(phoneTimer);
+      if (left > 0) { box.innerHTML = `Code expires in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} · <span class="link" data-x="new">New code</span>`; }
+      else { el.querySelector('#qrBox').classList.add('expired'); box.innerHTML = `Code expired · <span class="link" data-x="new">New code</span>`; clearInterval(phoneTimer); }
+      box.querySelector('[data-x="new"]').onclick = () => phoneConnectModal();
+    };
+    tick(); phoneTimer = setInterval(tick, 1000);
+  } else {
+    const r = d.req;
+    el.innerHTML = `<div class="m-ico">${I.phone}</div><h2>Allow this ${esc(r.kind)} to connect?</h2>
+      <p>${/^[aeiou]/i.test(r.kind) ? 'An' : 'A'} ${esc(r.kind)} at ${esc(r.ip)} scanned your code just now.<br>It will be able to <b>send files</b> to this PC and <b>download files you send it</b>. Nothing else.</p>
+      <div class="m-field"><label for="phName">Name it</label><input class="field" id="phName" maxlength="40" value="${esc(r.name || r.kind)}"><div class="small muted" id="phReplace" style="margin-top:6px;display:none"></div></div>
+      <label class="m-check"><input type="checkbox" id="phRemember" checked> Remember this ${esc(r.kind)} (no new code next time)</label>
+      <div class="btns"><button class="btn danger" data-x="deny">Deny</button><button class="btn primary" data-x="allow">${I.check}Allow</button></div>`;
+    const name = el.querySelector('#phName');
+    name.focus(); name.select();
+    // same name as a listed phone = that phone connecting again: say it replaces the old entry
+    const note = el.querySelector('#phReplace');
+    const checkName = () => { const n = name.value.trim().toLowerCase(), old = (S.phones || []).find(p => p.name.toLowerCase() === n); note.style.display = old ? '' : 'none'; if (old) note.textContent = `Replaces the ${old.name} already listed (use this if it lost its connection). Files waiting for it move over.`; };
+    name.addEventListener('input', checkName); checkName();
+    name.addEventListener('keydown', e => { if (e.key === 'Enter') el.querySelector('[data-x="allow"]').click(); });
+    el.querySelector('[data-x="deny"]').onclick = () => { act(api.phoneAnswer(r.sid, false, '', false)); done(); };
+    el.querySelector('[data-x="allow"]').onclick = async () => {
+      const n = name.value.trim() || r.kind;
+      try { await api.phoneAnswer(r.sid, true, n, el.querySelector('#phRemember').checked); toast(`${n} is connected. Send it files from the Files tab.`, 'ok'); fTarget = null; }
+      catch (e) { toast(e.message, 'warn'); }
+      done();
+    };
+  }
+}
+function phoneRenameModal(id) {
+  const p = phoneOf(id); if (!p) return;
+  queueModal({ key: 'phone-rename', render(el, close) {
+    el.innerHTML = `<div class="m-ico">${I.phone}</div><h2>Rename ${esc(p.name)}</h2>
+      <div class="m-field"><input class="field" id="prName" maxlength="40" value="${esc(p.name)}"></div>
+      <div class="btns"><button class="btn" data-x="cancel">Cancel</button><button class="btn primary" data-x="ok">Save</button></div>`;
+    const f = el.querySelector('#prName'); f.focus(); f.select();
+    const save = () => { const n = f.value.trim(); if (n) act(api.phoneRename(id, n)); close(); };
+    f.addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
+    el.querySelector('[data-x="cancel"]').onclick = close;
+    el.querySelector('[data-x="ok"]').onclick = save;
+  } });
 }
 
 function connectingModal(label) {
@@ -1155,6 +1701,29 @@ const A = {
   'rerun': ds => { const t = S.tasks.find(x => x.id === ds.id); if (t) act(api.runTask({ target: t.peerId, cmd: t.cmd, shell: t.shell, title: t.title })).then(id => { if (id) selTask = id; }); },
   'clear-tasks': () => { act(api.clearTasks()); },
   'f-target': ds => { fTarget = ds.id; Views.files.update(); },
+  'phone-connect': () => phoneConnectModal(),
+  'file-history': ds => openFileHistory(ds.id),
+  'nas-setup': () => nasSetupFlow(),
+  'nas-move': () => nasMoveFlow(true),
+  'nas-move-here': () => { if (!S.plan.nas) return toast('The NAS needs the Pro plan on this PC', 'warn'); nasMoveFlow(false); },
+  'nas-stop': async () => { if (await confirmBox({ title: 'Stop the NAS?', text: 'The files stay in the folder.', ok: 'Stop the NAS', danger: true })) act(api.nasStop()); },
+  'nas-retry': () => nasOpen(),
+  'nas-upload': async () => { const r = await act(api.nasPickUpload(nasUI.dir)); if (r) { if (r.local) { toast(`Saved ${r.count} item(s) to the NAS`, 'ok'); nasLoad(); } else toast('Saving to the NAS. Watch it in Files.', 'ok'); } },
+  'nas-mkdir': async () => { const n = await textModal({ title: 'New folder', value: 'New folder', ok: 'Create', icon: I.folder }); if (n && await act(api.nasOp('mkdir', { dir: nasUI.dir, name: n }))) nasLoad(); },
+  'nas-bin': () => nasBinModal(),
+  'nas-settings': () => nasSettingsModal(),
+  'nas-more': () => queueModal({ key: 'nas-more', render(el, close) {
+    el.innerHTML = `<div class="m-ico">${I.nas}</div><h2>The NAS</h2><p>The NAS is on <b>${esc(S.nas.elsewhere.name)}</b>. Its owner chooses who can use it.</p><div class="btns"><button class="btn" data-x="move">Move the NAS to this PC…</button><button class="btn primary" data-x="ok">Done</button></div>`;
+    addCloseX(el); el.querySelector('[data-x="ok"]').onclick = close;
+    el.querySelector('[data-x="move"]').onclick = () => { close(); if (!S.plan.nas) return toast('The NAS needs the Pro plan on this PC', 'warn'); nasMoveFlow(false); };
+  } }),
+  'tab-reset': ds => { const i = document.getElementById('tn-' + ds.k); if (i) i.value = ''; saveTabNames({ [ds.k]: '' }); },
+  'tabs-reset-all': async () => { if (await confirmBox({ title: 'Reset all tab names?', text: 'Every tab goes back to its default name on this PC.', ok: 'Reset all' })) { document.querySelectorAll('[data-tab-key]').forEach(i => { i.value = ''; }); saveTabNames(); } },
+  'phone-rename': ds => phoneRenameModal(ds.id),
+  'phone-forget': async ds => {
+    const p = phoneOf(ds.id); if (!p) return;
+    if (await confirmBox({ title: `Remove ${p.name}?`, text: `${p.name} won't be able to send or get files until it scans a new code. Files waiting for it are cancelled.`, ok: 'Remove', danger: true, icon: 'trash' })) act(api.phoneForget(ds.id));
+  },
   'pick-files': ds => { const t = ds.id || fTarget; if (!t) return toast('Pick a computer first', 'warn'); act(api.pickAndSend(t)); },
   'pick-folder': ds => { const t = ds.id || fTarget; if (!t) return toast('Pick a computer first', 'warn'); act(api.pickFolderAndSend(t)); },
   'cancel-transfer': ds => act(api.cancelTransfer(ds.id)),
@@ -1229,6 +1798,9 @@ async function quitApp() {
   api.on('toast', t => toast(t.text, t.kind));
   api.on('task-out', d => appendOut(d.taskId, d.data));
   api.on('pair-request', r => pairRequestModal(r));
+  api.on('phone-request', r => phoneAskModal(r));
+  api.on('ask', a => askModal(a));
+  api.on('phone-reopened', r => { if (phonePair && phonePair.sid === r.sid && activeModal && activeModal.m.key === 'phone') { clearInterval(phoneTimer); phonePair = null; closeModal('phone'); } toast(`${r.name} opened VELS`, 'ok'); });
   api.on('pair-pin-needed', p => pinEntryModal(p));
   api.on('pair-done', p => {
     closeModal('pair:' + p.sid); dropQueued('pair:' + p.sid); closeModal('connecting'); dropQueued('connecting');

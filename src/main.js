@@ -1,6 +1,6 @@
 'use strict';
 // VELS Syndicate — Electron main process (Windows + Linux).
-const { app, BrowserWindow, ipcMain, nativeTheme, dialog, shell, Tray, Menu, Notification, safeStorage, session, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, nativeTheme, dialog, shell, Tray, Menu, Notification, safeStorage, session, clipboard, powerSaveBlocker } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -136,14 +136,16 @@ function applyLoginItem() {
 
 // ---------- firewall (asks for admin rights) ----------
 function setupFirewall() {
-  const tcp = node.tcpPort, udp = node.udpPort;
+  const tcp = node.tcpPort, udp = node.udpPort, phone = node.phones.port;
   return new Promise(resolve => {
     if (IS_WIN) {
       const cmds = [
         `netsh advfirewall firewall delete rule name="VELS Syndicate TCP"`,
         `netsh advfirewall firewall delete rule name="VELS Syndicate UDP"`,
+        `netsh advfirewall firewall delete rule name="VELS Syndicate Phones"`,
         `netsh advfirewall firewall add rule name="VELS Syndicate TCP" dir=in action=allow protocol=TCP localport=${tcp} profile=private,domain`,
         `netsh advfirewall firewall add rule name="VELS Syndicate UDP" dir=in action=allow protocol=UDP localport=${udp} profile=private,domain`,
+        `netsh advfirewall firewall add rule name="VELS Syndicate Phones" dir=in action=allow protocol=TCP localport=${phone} profile=private,domain remoteip=localsubnet`,
       ].join(' & ');
       const ps = `Start-Process -FilePath cmd.exe -ArgumentList '/c ${cmds.replace(/'/g, "''")}' -Verb RunAs -WindowStyle Hidden -Wait`;
       execFile('powershell.exe', ['-NoProfile', '-Command', ps], { windowsHide: true }, err => {
@@ -154,7 +156,7 @@ function setupFirewall() {
     if (IS_LINUX) {
       // Only open the ports to private (home/office) address ranges.
       const nets = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
-      const rules = nets.flatMap(n => [`ufw allow proto tcp from ${n} to any port ${tcp}`, `ufw allow proto udp from ${n} to any port ${udp}`]).join(' && ');
+      const rules = nets.flatMap(n => [`ufw allow proto tcp from ${n} to any port ${tcp}`, `ufw allow proto udp from ${n} to any port ${udp}`, `ufw allow proto tcp from ${n} to any port ${phone}`]).join(' && ');
       execFile('sh', ['-c', 'command -v ufw'], err => {
         if (err) return resolve({ ok: false, error: 'No ufw firewall found — most Linux desktops then allow local connections already.' });
         execFile('pkexec', ['sh', '-c', rules], e2 => resolve(e2 ? { ok: false, error: 'The admin prompt was declined or pkexec is missing.' } : { ok: true }));
@@ -206,6 +208,54 @@ function registerIpc() {
   });
   h('answerFiles', (batchId, accept) => { need(isId(batchId) && typeof accept === 'boolean'); return node.answerFiles(batchId, accept); });
   h('cancelTransfer', id => { need(isId(id)); return node.cancelTransfer(id); });
+  // phones and tablets
+  const isSid = v => typeof v === 'string' && /^[0-9a-f]{16}$/.test(v);
+  h('phoneConnect', () => node.phoneConnect());
+  // file history (Office → a PC → File history)
+  const pinOk = p => p == null || (typeof p === 'string' && /^\d{4,6}$/.test(p));
+  h('fileHistory', (id, pin) => { need(isId(id) && pinOk(pin)); return node.fileHistory(id, pin); });
+  h('fileHistoryAct', (id, action, ids, target, pin) => { need(isId(id) && typeof action === 'string' && Array.isArray(ids) && ids.length <= 500 && (target == null || isId(target)) && pinOk(pin)); return node.fileHistoryAct(id, action, ids, target, pin); });
+  h('resendLocal', (ids, target) => { need(Array.isArray(ids) && ids.length <= 500 && isId(target)); return node.resendLocal(ids, target); });
+  // the NAS
+  const relOk = r => r == null || (typeof r === 'string' && r.length <= 2048);
+  const nasOpts = o => { need(o && typeof o === 'object'); const out = {}; for (const k of ['recycle', 'awake', 'askNew']) if (typeof o[k] === 'boolean') out[k] = o[k]; if (typeof o.label === 'string' && o.label.length <= 60) out.label = o.label; return out; };
+  h('nasPickFolder', async (title) => {
+    const r = await dialog.showOpenDialog(win, { title: typeof title === 'string' ? title.slice(0, 80) : 'Choose the NAS folder', properties: ['openDirectory', 'createDirectory'] });
+    return r.canceled || !r.filePaths.length ? null : r.filePaths[0];
+  });
+  h('nasDrives', () => {
+    const out = [];
+    if (process.platform === 'win32') {
+      for (const L of 'CDEFGHIJKLMNOPQRSTUVWXYZ') { try { const s = fs.statfsSync(L + ':\\'); out.push({ drive: L + ':', free: s.bavail * s.bsize, total: s.blocks * s.bsize }); } catch {} }
+    } else { try { const s = fs.statfsSync(app.getPath('home')); out.push({ drive: '~', free: s.bavail * s.bsize, total: s.blocks * s.bsize }); } catch {} }
+    return out;
+  });
+  h('nasSetup', (root, o) => { need(typeof root === 'string' && root.length < 1024); return node.nas.setup(root, nasOpts(o || {})); });
+  h('nasUpdate', o => node.nas.update(nasOpts(o)));
+  h('nasSetAccess', (id, level, kids) => { need(isId(id) && ['full', 'view', 'none', 'ask'].includes(level)); return node.nas.setAccess(id, level, !!kids); });
+  h('nasStop', () => node.nas.stop());
+  h('nasMove', (root, mode) => { need(typeof root === 'string' && root.length < 1024 && ['copy', 'empty'].includes(mode)); return node.nas.move(root, mode); });
+  h('nasTakeOver', (root, mode, pin) => { need(typeof root === 'string' && root.length < 1024 && ['copy', 'empty'].includes(mode) && pinOk(pin)); return node.nas.takeOver(root, mode, pin || undefined); });
+  h('nasOp', (op, args) => { need(typeof op === 'string' && op.length < 20 && (args == null || typeof args === 'object')); const a = args || {}; need(relOk(a.dir) && relOk(a.path) && (a.paths == null || (Array.isArray(a.paths) && a.paths.length <= 500 && a.paths.every(relOk)))); return node.nasOp(op, a); });
+  h('nasUpload', (paths, dir) => { need(Array.isArray(paths) && paths.length && paths.length <= 1000 && paths.every(p => typeof p === 'string') && relOk(dir)); return node.nasUpload(paths, dir); });
+  h('nasPickUpload', async dir => {
+    need(relOk(dir));
+    const r = await dialog.showOpenDialog(win, { title: 'Save to the NAS', properties: ['openFile', 'multiSelections'] });
+    if (r.canceled || !r.filePaths.length) return null;
+    return node.nasUpload(r.filePaths, dir);
+  });
+  h('nasOpenLocal', async (rel, how) => {
+    need(relOk(rel) && (how === 'open' || how === 'show'));
+    const p = node.nasLocalPath(rel);
+    if (how === 'show') { shell.showItemInFolder(p); return; }
+    const e = await shell.openPath(p); if (e) throw new Error(e);
+  });
+  h('setTabNames', names => { need(names && typeof names === 'object'); return node.setTabNames(names); });
+  h('answerAsk', (reqId, kind, allow, extra) => { need(isId(reqId) && typeof kind === 'string' && typeof allow === 'boolean'); return node.answerAsk(reqId, kind, allow, extra); });
+  h('phoneAnswer', (sid, allow, name, remember) => { need(isSid(sid) && typeof allow === 'boolean' && typeof name === 'string' && name.length <= 60 && typeof remember === 'boolean'); return node.phoneAnswer(sid, allow, name, remember); });
+  h('phoneCancel', sid => { need(isSid(sid)); return node.phoneCancel(sid); });
+  h('phoneRename', (id, name) => { need(isId(id) && typeof name === 'string' && name.length <= 60); return node.phoneRename(id, name); });
+  h('phoneForget', id => { need(isId(id)); return node.phoneForget(id); });
   h('clearTransfers', () => node.clearFinishedTransfers());
   h('openReceived', async () => { fs.mkdirSync(node.settings.receiveDir, { recursive: true }); return shell.openPath(node.settings.receiveDir); });
   // open or show a finished transfer (only files this app sent or received, looked up by id)
@@ -287,7 +337,7 @@ app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
 
-  node = new VelsNode({ dataDir: path.join(app.getPath('userData'), 'node'), secretStore: makeSecretStore() });
+  node = new VelsNode({ dataDir: path.join(app.getPath('userData'), 'node'), secretStore: makeSecretStore(), trash: p => shell.trashItem(p) });
   applyTheme();
   registerIpc();
 
@@ -298,9 +348,18 @@ app.whenReady().then(async () => {
   node.on('pair-pin-needed', p => send('pair-pin-needed', p));
   node.on('choose-main', p => send('choose-main', p));
   node.on('pair-done', p => send('pair-done', p));
+  node.on('phone-reopened', r => send('phone-reopened', r));
+  node.on('ask', a => { send('ask', a); notify(a.kind === 'tabs' ? 'Tab names' : 'Request', `${a.peerName} is asking for permission. Open VELS Syndicate to answer.`); });
+  node.on('phone-request', r => { send('phone-request', r); notify('Phone wants to connect', `${r.kind} at ${r.ip} scanned your code. Open VELS Syndicate to allow it.`); });
   node.on('task-approval', a => { send('task-approval', a); notify('Task request', `${a.peerName} wants to run: ${a.title || a.cmd.slice(0, 80)}`); });
   node.on('request-gone', g => send('request-gone', g));
   node.on('file-offer', o => { send('file-offer', o); notify('Incoming files', `${o.peerName} wants to send ${o.count} file${o.count === 1 ? '' : 's'}`); });
+  // keep this PC awake while it's the NAS (the screen can still turn off)
+  let awakeId = null;
+  node.on('nas-awake', on => {
+    if (on && awakeId == null) awakeId = powerSaveBlocker.start('prevent-app-suspension');
+    else if (!on && awakeId != null) { powerSaveBlocker.stop(awakeId); awakeId = null; }
+  });
   node.on('file-received', f => send('toast', { kind: 'ok', text: `Received ${f.name}` }));
   node.on('task-finished', f => notify('Task finished', `${f.title} — ${f.state}`));
   node.on('security-alert', e => notify('Security', e.text));
